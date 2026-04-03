@@ -164,7 +164,9 @@ assert_contains "Has governance error" "$OUTPUT" "governance error"
 
 echo ""
 echo "--- PreToolUse: network failure → allow (fail-open) ---"
-OUTPUT=$(AXONFLOW_ENDPOINT="http://127.0.0.1:19999" echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | "$PRE_HOOK" 2>/dev/null)
+# Run hook in a subshell with overridden endpoint pointing to a port nothing listens on.
+# The env var must apply to the hook process, not just the echo.
+OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | AXONFLOW_ENDPOINT="http://127.0.0.1:19999" "$PRE_HOOK" 2>/dev/null)
 EXIT_CODE=$?
 assert_eq "Exit code is 0 (fail-open)" "0" "$EXIT_CODE"
 assert_empty "No output (silent allow on network failure)" "$OUTPUT"
