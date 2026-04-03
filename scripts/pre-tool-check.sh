@@ -137,7 +137,9 @@ if [ -z "$TOOL_RESULT" ]; then
   exit 0
 fi
 
-ALLOWED=$(echo "$TOOL_RESULT" | jq -r '.allowed // true' 2>/dev/null || echo "true")
+# Note: jq's // operator treats false as falsy, so .allowed // true returns
+# true even when .allowed is false. Use explicit if/else instead.
+ALLOWED=$(echo "$TOOL_RESULT" | jq -r 'if .allowed == false then "false" else "true" end' 2>/dev/null || echo "true")
 BLOCK_REASON=$(echo "$TOOL_RESULT" | jq -r '.block_reason // empty' 2>/dev/null || echo "")
 POLICIES_EVALUATED=$(echo "$TOOL_RESULT" | jq -r '.policies_evaluated // 0' 2>/dev/null || echo "0")
 
