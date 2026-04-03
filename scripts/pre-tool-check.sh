@@ -99,14 +99,41 @@ RESPONSE=$(curl -s --max-time 8 -X POST "${ENDPOINT}/api/v1/mcp-server" \
       }
     }')" 2>/dev/null || echo "")
 
-# If AxonFlow is unreachable, fail-open (allow)
+# If AxonFlow is unreachable (empty response = network failure), fail-open
 if [ -z "$RESPONSE" ]; then
+  exit 0
+fi
+
+# Check for JSON-RPC error responses (auth failure, server error, etc.)
+# These are NOT network failures — they indicate misconfiguration.
+# Fail CLOSED on auth/config errors to prevent silent governance bypass.
+JSONRPC_ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty' 2>/dev/null || echo "")
+if [ -n "$JSONRPC_ERROR" ]; then
+  JSONRPC_CODE=$(echo "$RESPONSE" | jq -r '.error.code // 0' 2>/dev/null || echo "0")
+  # Auth errors (-32001) and internal errors (-32603) = deny
+  # Method not found (-32601) = likely misconfiguration = deny
+  # Parse errors (-32700) = allow (could be transient)
+  if [ "$JSONRPC_CODE" != "-32700" ]; then
+    jq -n \
+      --arg err "$JSONRPC_ERROR" \
+      '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: ("AxonFlow governance error: " + $err + ". Fix AxonFlow configuration to restore tool access.")
+        }
+      }'
+    exit 0
+  fi
+  # Parse error — likely transient, fail-open
   exit 0
 fi
 
 # Parse the MCP response to get the tool result
 TOOL_RESULT=$(echo "$RESPONSE" | jq -r '.result.content[0].text // empty' 2>/dev/null || echo "")
 if [ -z "$TOOL_RESULT" ]; then
+  # Got a response but couldn't extract tool result — unexpected format
+  # Fail-open for robustness (not an auth issue)
   exit 0
 fi
 

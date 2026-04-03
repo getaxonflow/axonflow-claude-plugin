@@ -2,7 +2,9 @@
 
 Policy enforcement, PII detection, and audit trails for Claude Code.
 
-This plugin automatically governs every tool call — checking policies before execution, scanning outputs for PII/secrets after execution, and recording audit entries for compliance. No manual intervention needed.
+This plugin automatically governs tool calls — checking policies before execution, scanning outputs for PII/secrets after execution, and recording audit entries for compliance. No manual intervention needed.
+
+**Governed tools:** `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP server tools (`mcp__*`). Read-only tools (`Read`, `Glob`, `Grep`) are not governed by default since they don't modify state or send data externally.
 
 ## How It Works
 
@@ -19,10 +21,12 @@ PreToolUse hook fires automatically
                       │
                       ▼
                  PostToolUse hook fires automatically
-                      │ → audit_tool_call(tool, input, output)
+                      │ → audit_tool_call(tool, input, output)  [background]
                       │ → check_output(tool result for PII/secrets)
                       │
-                      ├─ PII found → Claude warned, redacted version provided
+                      ├─ PII found → Claude instructed to use redacted version
+                      │              (original output is not transformed — Claude
+                      │               receives guidance to not expose raw PII)
                       └─ Clean → Silent, no interruption
 ```
 
@@ -72,11 +76,14 @@ export AXONFLOW_ENDPOINT=http://your-axonflow-host:8080
 |-------|------|--------|
 | Before every tool call | PreToolUse | `check_policy` evaluates tool inputs against governance policies |
 | After every tool call | PostToolUse | `audit_tool_call` records execution in compliance audit trail |
-| After every tool call | PostToolUse | `check_output` scans tool output for PII/secrets |
+| After every tool call | PostToolUse | `check_output` scans output for PII/secrets, instructs Claude to use redacted version |
 
 Governed tools: `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP tools (`mcp__*`).
 
-If AxonFlow is unreachable, the plugin fails open (tool execution continues). This matches the `onError: allow` pattern from the OpenClaw plugin.
+**Fail behavior:**
+- AxonFlow unreachable (network failure) → fail-open, tool execution continues
+- AxonFlow auth/config error → fail-closed, tool call denied until configuration is fixed
+- PostToolUse failures → never block (audit and PII scan are best-effort)
 
 ## MCP Tools (Also Available for Explicit Use)
 

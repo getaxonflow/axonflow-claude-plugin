@@ -118,14 +118,32 @@ if [ -n "$OUTPUT_TEXT" ] && [ "$OUTPUT_TEXT" != "null" ]; then
     SCAN_RESULT=$(echo "$SCAN_RESPONSE" | jq -r '.result.content[0].text // empty' 2>/dev/null || echo "")
     if [ -n "$SCAN_RESULT" ]; then
       REDACTED=$(echo "$SCAN_RESULT" | jq -r '.redacted_message // empty' 2>/dev/null || echo "")
+      POLICIES_FOUND=$(echo "$SCAN_RESULT" | jq -r '.policies_evaluated // 0' 2>/dev/null || echo "0")
+      ALLOWED=$(echo "$SCAN_RESULT" | jq -r '.allowed // true' 2>/dev/null || echo "true")
+
       if [ -n "$REDACTED" ] && [ "$REDACTED" != "null" ]; then
-        # PII detected — inform Claude via hook output
+        # PII detected in tool output. PostToolUse hooks cannot transform
+        # the original output — we can only instruct Claude not to expose
+        # the raw PII in its response to the user.
         jq -n \
           --arg redacted "$REDACTED" \
+          --arg policies "$POLICIES_FOUND" \
           '{
             hookSpecificOutput: {
               hookEventName: "PostToolUse",
-              additionalContext: ("WARNING: PII detected in tool output. Redacted version: " + $redacted + ". Do not expose the original PII in your response.")
+              additionalContext: ("GOVERNANCE ALERT: PII/sensitive data detected in tool output (" + $policies + " policies evaluated). You MUST use this redacted version instead of the original: " + $redacted)
+            }
+          }'
+        exit 0
+      elif [ "$ALLOWED" = "false" ]; then
+        # Output blocked by policy (not just PII redaction)
+        BLOCK_REASON=$(echo "$SCAN_RESULT" | jq -r '.block_reason // "Policy violation in tool output"' 2>/dev/null || echo "")
+        jq -n \
+          --arg reason "$BLOCK_REASON" \
+          '{
+            hookSpecificOutput: {
+              hookEventName: "PostToolUse",
+              additionalContext: ("GOVERNANCE ALERT: Tool output blocked by policy: " + $reason + ". Do not use or reference the blocked output in your response.")
             }
           }'
         exit 0
