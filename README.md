@@ -1,12 +1,38 @@
 # AxonFlow Plugin for Claude Code
 
-Governance tools for Claude Code — policy checking, PII scanning, and audit trails via MCP.
+Policy enforcement, PII detection, and audit trails for Claude Code.
 
-This plugin gives Claude access to five AxonFlow governance tools. Claude can use them to check policies before running commands, scan outputs for sensitive data, and log actions for compliance. **These are tools Claude can call, not automatic hooks** — automatic pre/post-tool enforcement is planned for a future release.
+This plugin automatically governs tool calls — checking policies before execution, scanning outputs for PII/secrets after execution, and recording audit entries for compliance. No manual intervention needed.
+
+**Governed tools:** `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP server tools (`mcp__*`). Read-only tools (`Read`, `Glob`, `Grep`) are not governed by default since they don't modify state or send data externally.
+
+## How It Works
+
+```
+Claude selects a tool (Bash, Write, MCP, etc.)
+    │
+    ▼
+PreToolUse hook fires automatically
+    │ → check_policy("claude_code.Bash", "rm -rf /")
+    │
+    ├─ BLOCKED → Claude receives denial reason, tool never runs
+    │
+    └─ ALLOWED → Tool executes normally
+                      │
+                      ▼
+                 PostToolUse hook fires automatically
+                      │ → audit_tool_call(tool, input, output)  [background]
+                      │ → check_output(tool result for PII/secrets)
+                      │
+                      ├─ PII found → Claude instructed to use redacted version
+                      │              (original output is not transformed — Claude
+                      │               receives guidance to not expose raw PII)
+                      └─ Clean → Silent, no interruption
+```
 
 ## Prerequisites
 
-AxonFlow must be running. No LLM provider keys needed — Claude Code handles LLM calls, AxonFlow only evaluates policies and records audit trails.
+AxonFlow must be running. No LLM provider keys needed — Claude Code handles LLM calls, AxonFlow only enforces policies and records audit trails.
 
 ```bash
 git clone https://github.com/getaxonflow/axonflow.git
@@ -44,59 +70,58 @@ export AXONFLOW_AUTH=$(echo -n "your-client-id:your-client-secret" | base64)
 export AXONFLOW_ENDPOINT=http://your-axonflow-host:8080
 ```
 
-## Tools
+## What Happens Automatically
 
-Once installed, Claude Code has access to five governance tools:
+| Event | Hook | Action |
+|-------|------|--------|
+| Before governed tool call | PreToolUse | `check_policy` evaluates tool inputs against governance policies |
+| After governed tool call | PostToolUse | `audit_tool_call` records execution in compliance audit trail |
+| After governed tool call | PostToolUse | `check_output` scans output for PII/secrets, instructs Claude to use redacted version |
+
+Governed tools: `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP tools (`mcp__*`).
+
+**Fail behavior:**
+- AxonFlow unreachable (network failure) → fail-open, tool execution continues
+- AxonFlow auth/config error → fail-closed, tool call denied until configuration is fixed
+- PostToolUse failures → never block (audit and PII scan are best-effort)
+
+## MCP Tools (Also Available for Explicit Use)
+
+In addition to automatic hooks, Claude can call these tools explicitly:
 
 | Tool | Purpose |
 |------|---------|
-| `check_policy` | Evaluate tool inputs against governance policies |
-| `check_output` | Scan tool output for PII, secrets, and policy violations |
-| `audit_tool_call` | Record tool execution in the compliance audit trail |
+| `check_policy` | Evaluate specific inputs against policies |
+| `check_output` | Scan specific content for PII/secrets |
+| `audit_tool_call` | Record additional audit entries |
 | `list_policies` | List active governance policies (static + dynamic) |
-| `get_policy_stats` | Get governance activity summary (checks, blocks, top policies) |
-
-Claude can call these tools proactively when it determines governance checks are appropriate. For example, before running a potentially dangerous shell command or after receiving output that might contain PII.
+| `get_policy_stats` | Get governance activity summary |
 
 ## What Gets Checked
 
-AxonFlow's 83 built-in system policies cover:
+AxonFlow's system policies cover:
 
+- **Dangerous commands**: reverse shells, `rm -rf`, `curl | bash`, credential access
 - **PII detection**: SSN, credit card, email, phone, Aadhaar, PAN — with redaction
 - **SQL injection**: 37+ detection patterns
-- **Dangerous commands**: reverse shells, destructive operations, credential access
 - **Secrets exposure**: API keys, connection strings, code secrets
 - **SSRF**: cloud metadata endpoint and internal network blocking
 - **Path traversal**: workspace escape pattern detection
 
-## Example Usage
+## Plugin Structure
 
 ```
-You: "Delete all temp files from the server"
-
-Claude calls check_policy("claude_code.Bash", "rm -rf /tmp/*")
-  → AxonFlow: allowed=true (safe path, not root)
-
-Claude runs: rm -rf /tmp/*
-
-Claude calls audit_tool_call("Bash", input={command: "rm -rf /tmp/*"}, success=true)
-  → Audit entry recorded
+axonflow-claude-plugin/
+├── .claude-plugin/
+│   └── plugin.json        # Plugin metadata
+├── .mcp.json               # MCP server connection (5 governance tools)
+├── hooks/
+│   └── hooks.json          # PreToolUse + PostToolUse hook definitions
+├── scripts/
+│   ├── pre-tool-check.sh   # Policy evaluation before tool execution
+│   └── post-tool-audit.sh  # Audit logging + PII scan after execution
+└── README.md
 ```
-
-```
-You: "Show me the customer database query results"
-
-Claude runs a query, gets results containing SSN 123-45-6789
-
-Claude calls check_output("claude_code.mcp__postgres", message="SSN: 123-45-6789")
-  → AxonFlow: PII detected, redacted_message="SSN: [REDACTED:ssn]"
-
-Claude shows redacted output to user
-```
-
-## Future: Automatic Enforcement
-
-Phase 2 of this plugin will add PreToolUse and PostToolUse hooks that automatically call `check_policy` and `check_output` around every tool execution — no manual calls needed. This is tracked in [axonflow-enterprise#1484](https://github.com/getaxonflow/axonflow-enterprise/issues/1484).
 
 ## Links
 
