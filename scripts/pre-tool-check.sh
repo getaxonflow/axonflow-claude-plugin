@@ -142,7 +142,35 @@ BLOCK_REASON=$(echo "$TOOL_RESULT" | jq -r '.block_reason // empty' 2>/dev/null 
 POLICIES_EVALUATED=$(echo "$TOOL_RESULT" | jq -r '.policies_evaluated // 0' 2>/dev/null || echo "0")
 
 if [ "$ALLOWED" = "false" ]; then
-  # Blocked by policy — deny the tool call (exit 0 + JSON permissionDecision)
+  # Record the blocked attempt in the audit trail (fire-and-forget).
+  # This ensures blocked events appear in audit search and compliance reports.
+  curl -s --max-time 5 -X POST "${ENDPOINT}/api/v1/mcp-server" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    "${AUTH_HEADER[@]}" \
+    -d "$(jq -n \
+      --arg tn "$TOOL_NAME" \
+      --arg stmt "$STATEMENT" \
+      --arg reason "$BLOCK_REASON" \
+      --arg policies "$POLICIES_EVALUATED" \
+      '{
+        jsonrpc: "2.0",
+        id: "hook-audit-blocked",
+        method: "tools/call",
+        params: {
+          name: "audit_tool_call",
+          arguments: {
+            tool_name: $tn,
+            tool_type: "claude_code",
+            input: {statement: $stmt},
+            output: {policy_decision: "blocked", block_reason: $reason, policies_evaluated: $policies},
+            success: false,
+            error_message: ("Blocked by policy: " + $reason)
+          }
+        }
+      }')" > /dev/null 2>&1 &
+
+  # Return deny decision to Claude Code
   jq -n \
     --arg reason "$BLOCK_REASON" \
     --arg policies "$POLICIES_EVALUATED" \
