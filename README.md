@@ -70,7 +70,7 @@ export AXONFLOW_ENDPOINT=http://your-axonflow-host:8080
 
 | Event | Hook | Action |
 |-------|------|--------|
-| Before every tool call | PreToolUse | `check_policy` evaluates tool inputs against 86+ governance policies |
+| Before every tool call | PreToolUse | `check_policy` evaluates tool inputs against governance policies |
 | After every tool call | PostToolUse | `audit_tool_call` records execution in compliance audit trail |
 | After every tool call | PostToolUse | `check_output` scans tool output for PII/secrets |
 

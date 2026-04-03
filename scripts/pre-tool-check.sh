@@ -5,10 +5,27 @@
 # Reads tool_name and tool_input from stdin (JSON).
 # Calls AxonFlow check_policy via the MCP server endpoint.
 # Returns deny/allow decision based on policy evaluation.
-set -euo pipefail
+#
+# Exit 0 + JSON with permissionDecision:"deny" = structured denial
+# Exit 0 + no output = allow (no opinion)
+# Exit 0 + JSON with permissionDecision:"allow" = explicit allow
+
+# Fail-open: if anything goes wrong, allow the tool call
+if ! command -v jq &>/dev/null; then
+  exit 0
+fi
+if ! command -v curl &>/dev/null; then
+  exit 0
+fi
 
 ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
 AUTH="${AXONFLOW_AUTH:-}"
+
+# Build auth header array safely (avoids word-splitting)
+AUTH_HEADER=()
+if [ -n "$AUTH" ]; then
+  AUTH_HEADER=(-H "Authorization: Basic $AUTH")
+fi
 
 # Read hook input from stdin
 INPUT=$(cat)
@@ -29,18 +46,28 @@ case "$TOOL_NAME" in
   Bash)
     STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.command // empty')
     ;;
-  Write|Edit)
-    STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
+  Write)
+    # Check both path and content — malicious content to a safe path should be caught
+    FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
+    CONTENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | head -c 2000)
+    STATEMENT="${FILE_PATH}"$'\n'"${CONTENT}"
+    ;;
+  Edit)
+    FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
+    NEW_STRING=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | head -c 2000)
+    STATEMENT="${FILE_PATH}"$'\n'"${NEW_STRING}"
     ;;
   NotebookEdit)
     STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.cell_content // .content // empty')
     ;;
   mcp__*)
-    # MCP tools: serialize entire input as the statement
-    STATEMENT=$(echo "$TOOL_INPUT" | jq -c '.')
+    # MCP tools: extract query/statement field if present, else serialize input
+    STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.query // .statement // .command // .url // empty')
+    if [ -z "$STATEMENT" ] || [ "$STATEMENT" = "null" ]; then
+      STATEMENT=$(echo "$TOOL_INPUT" | jq -c '.')
+    fi
     ;;
   *)
-    # Unknown tools: serialize entire input
     STATEMENT=$(echo "$TOOL_INPUT" | jq -c '.')
     ;;
 esac
@@ -54,7 +81,7 @@ fi
 RESPONSE=$(curl -s --max-time 8 -X POST "${ENDPOINT}/api/v1/mcp-server" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
-  ${AUTH:+-H "Authorization: Basic $AUTH"} \
+  "${AUTH_HEADER[@]}" \
   -d "$(jq -n \
     --arg ct "$CONNECTOR_TYPE" \
     --arg stmt "$STATEMENT" \
@@ -88,7 +115,7 @@ BLOCK_REASON=$(echo "$TOOL_RESULT" | jq -r '.block_reason // empty' 2>/dev/null 
 POLICIES_EVALUATED=$(echo "$TOOL_RESULT" | jq -r '.policies_evaluated // 0' 2>/dev/null || echo "0")
 
 if [ "$ALLOWED" = "false" ]; then
-  # Blocked by policy — deny the tool call
+  # Blocked by policy — deny the tool call (exit 0 + JSON permissionDecision)
   jq -n \
     --arg reason "$BLOCK_REASON" \
     --arg policies "$POLICIES_EVALUATED" \
@@ -102,5 +129,5 @@ if [ "$ALLOWED" = "false" ]; then
   exit 0
 fi
 
-# Allowed — no output needed, exit 0
+# Allowed — no output needed
 exit 0
