@@ -1,5 +1,5 @@
 {
-  "description": "AxonFlow governance hooks — automatic policy enforcement, PII scanning, and audit trails for every tool call",
+  "description": "AxonFlow governance hooks — automatic policy enforcement, PII scanning, and audit trails for governed tool calls",
   "hooks": {
     "PreToolUse": [
       {

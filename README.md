@@ -74,9 +74,9 @@ export AXONFLOW_ENDPOINT=http://your-axonflow-host:8080
 
 | Event | Hook | Action |
 |-------|------|--------|
-| Before every tool call | PreToolUse | `check_policy` evaluates tool inputs against governance policies |
-| After every tool call | PostToolUse | `audit_tool_call` records execution in compliance audit trail |
-| After every tool call | PostToolUse | `check_output` scans output for PII/secrets, instructs Claude to use redacted version |
+| Before governed tool call | PreToolUse | `check_policy` evaluates tool inputs against governance policies |
+| After governed tool call | PostToolUse | `audit_tool_call` records execution in compliance audit trail |
+| After governed tool call | PostToolUse | `check_output` scans output for PII/secrets, instructs Claude to use redacted version |
 
 Governed tools: `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP tools (`mcp__*`).
 
