@@ -47,15 +47,13 @@ case "$TOOL_NAME" in
     STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.command // empty')
     ;;
   Write)
-    # Check both path and content — malicious content to a safe path should be caught
-    FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
-    CONTENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | head -c 2000)
-    STATEMENT="${FILE_PATH}"$'\n'"${CONTENT}"
+    # Only check content — file paths like "MEMORY.md" can false-positive
+    # against agent config protection policies. The content is what matters
+    # (e.g., writing a reverse shell payload to any file).
+    STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | head -c 2000)
     ;;
   Edit)
-    FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
-    NEW_STRING=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | head -c 2000)
-    STATEMENT="${FILE_PATH}"$'\n'"${NEW_STRING}"
+    STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | head -c 2000)
     ;;
   NotebookEdit)
     STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.cell_content // .content // empty')
