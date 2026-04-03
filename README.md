@@ -1,10 +1,12 @@
 # AxonFlow Plugin for Claude Code
 
-Policy enforcement, PII detection, and audit trails for Claude Code.
+Governance tools for Claude Code — policy checking, PII scanning, and audit trails via MCP.
+
+This plugin gives Claude access to five AxonFlow governance tools. Claude can use them to check policies before running commands, scan outputs for sensitive data, and log actions for compliance. **These are tools Claude can call, not automatic hooks** — automatic pre/post-tool enforcement is planned for a future release.
 
 ## Prerequisites
 
-AxonFlow must be running. No LLM provider keys needed — Claude Code handles LLM calls, AxonFlow only enforces policies and records audit trails.
+AxonFlow must be running. No LLM provider keys needed — Claude Code handles LLM calls, AxonFlow only evaluates policies and records audit trails.
 
 ```bash
 git clone https://github.com/getaxonflow/axonflow.git
@@ -15,14 +17,16 @@ Verify: `curl -s http://localhost:8080/health | jq .`
 
 ## Install
 
-```bash
-claude /plugin install axonflow@claude-plugins-official
-```
-
-Or load locally for testing:
+Load locally for testing:
 
 ```bash
 claude --plugin-dir /path/to/this/directory
+```
+
+Or once listed in the official marketplace:
+
+```bash
+/plugin install axonflow@claude-plugins-official
 ```
 
 ## Configure
@@ -46,46 +50,53 @@ Once installed, Claude Code has access to five governance tools:
 
 | Tool | Purpose |
 |------|---------|
-| `check_policy` | Evaluate tool inputs against governance policies before execution |
+| `check_policy` | Evaluate tool inputs against governance policies |
 | `check_output` | Scan tool output for PII, secrets, and policy violations |
 | `audit_tool_call` | Record tool execution in the compliance audit trail |
-| `list_policies` | List active governance policies (names, categories, patterns) |
+| `list_policies` | List active governance policies (static + dynamic) |
 | `get_policy_stats` | Get governance activity summary (checks, blocks, top policies) |
 
-## What Gets Governed
+Claude can call these tools proactively when it determines governance checks are appropriate. For example, before running a potentially dangerous shell command or after receiving output that might contain PII.
 
-AxonFlow's 83 built-in system policies protect against:
+## What Gets Checked
 
-- **PII leakage**: SSN, credit card, email, phone, Aadhaar, PAN detection and redaction
+AxonFlow's 83 built-in system policies cover:
+
+- **PII detection**: SSN, credit card, email, phone, Aadhaar, PAN — with redaction
 - **SQL injection**: 37+ detection patterns
 - **Dangerous commands**: reverse shells, destructive operations, credential access
 - **Secrets exposure**: API keys, connection strings, code secrets
 - **SSRF**: cloud metadata endpoint and internal network blocking
 - **Path traversal**: workspace escape pattern detection
 
-## How It Works
+## Example Usage
 
 ```
-Claude Code selects a tool (Bash, Write, MCP, etc.)
-    │
-    ▼
-check_policy("claude_code.Bash", "rm -rf /tmp/*")
-    │
-    ├─ BLOCKED → Claude receives block reason, skips execution
-    │
-    └─ ALLOWED → Tool executes normally
-                      │
-                      ▼
-                 check_output(tool result)
-                      │
-                      ├─ PII found → Redacted data returned
-                      └─ Clean → Original data returned
-                                    │
-                                    ▼
-                               audit_tool_call(tool, input, output)
-                                    │
-                                    └─ Audit entry created
+You: "Delete all temp files from the server"
+
+Claude calls check_policy("claude_code.Bash", "rm -rf /tmp/*")
+  → AxonFlow: allowed=true (safe path, not root)
+
+Claude runs: rm -rf /tmp/*
+
+Claude calls audit_tool_call("Bash", input={command: "rm -rf /tmp/*"}, success=true)
+  → Audit entry recorded
 ```
+
+```
+You: "Show me the customer database query results"
+
+Claude runs a query, gets results containing SSN 123-45-6789
+
+Claude calls check_output("claude_code.mcp__postgres", message="SSN: 123-45-6789")
+  → AxonFlow: PII detected, redacted_message="SSN: [REDACTED:ssn]"
+
+Claude shows redacted output to user
+```
+
+## Future: Automatic Enforcement
+
+Phase 2 of this plugin will add PreToolUse and PostToolUse hooks that automatically call `check_policy` and `check_output` around every tool execution — no manual calls needed. This is tracked in [axonflow-enterprise#1484](https://github.com/getaxonflow/axonflow-enterprise/issues/1484).
 
 ## Links
 
