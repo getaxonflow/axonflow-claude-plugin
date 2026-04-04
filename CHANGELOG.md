@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **MCP tools not discoverable in Claude Code.** Claude Code's HTTP MCP client ignores static `headers` in `.mcp.json` and always attempts OAuth discovery first. Switched to `headersHelper` which generates auth headers via a shell command, bypassing the OAuth flow. Community mode (no auth) returns empty headers.
+
+### Added
+
+- `scripts/mcp-auth-headers.sh` — auth header generator for MCP server connection. Supports community mode (no auth) and enterprise mode (Basic auth via `AXONFLOW_AUTH`).
+- `tests/E2E_TESTING_PLAYBOOK.md` — comprehensive testing playbook covering hooks, MCP tools, integration activation, and edge cases.
+
+---
+
 ## [0.1.0] - 2026-04-04
 
 ### Added
