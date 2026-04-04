@@ -105,8 +105,8 @@ These tests verify the 6 MCP tools are discoverable and functional.
 
 | # | Scenario | Expected |
 |---|---|---|
-| 4.1 | Kill AxonFlow while plugin is connected | Hooks fail-open (commands still execute). MCP tools return errors. |
-| 4.2 | Set invalid `AXONFLOW_AUTH` in enterprise mode | MCP initialize fails, tools unavailable. Hooks fail-open. |
+| 4.1 | Kill AxonFlow while plugin is connected | Hooks fail-open on network errors (commands still execute). MCP tools return errors. |
+| 4.2 | Set invalid `AXONFLOW_AUTH` in enterprise mode | MCP initialize fails, tools unavailable. Hooks fail-closed (auth/config errors produce a deny decision, blocking tool calls). |
 | 4.3 | Restart AxonFlow while plugin is connected | Session expires, new session auto-created on next request. |
 
 ---
