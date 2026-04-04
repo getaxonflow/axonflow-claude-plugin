@@ -47,13 +47,17 @@ case "$TOOL_NAME" in
     STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.command // empty')
     ;;
   Write)
-    # Only check content — file paths like "MEMORY.md" can false-positive
-    # against agent config protection policies. The content is what matters
-    # (e.g., writing a reverse shell payload to any file).
-    STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | head -c 2000)
+    # Check both path and content — path-based protection policies (e.g.,
+    # .claude/settings, MEMORY.md) are scoped via integration activation,
+    # so they only fire when the relevant integration is enabled.
+    FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
+    CONTENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | head -c 2000)
+    STATEMENT="${FILE_PATH}"$'\n'"${CONTENT}"
     ;;
   Edit)
-    STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | head -c 2000)
+    FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
+    NEW_STRING=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | head -c 2000)
+    STATEMENT="${FILE_PATH}"$'\n'"${NEW_STRING}"
     ;;
   NotebookEdit)
     STATEMENT=$(echo "$TOOL_INPUT" | jq -r '.cell_content // .content // empty')
