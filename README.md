@@ -96,6 +96,7 @@ In addition to automatic hooks, Claude can call these tools explicitly:
 | `audit_tool_call` | Record additional audit entries |
 | `list_policies` | List active governance policies (static + dynamic) |
 | `get_policy_stats` | Get governance activity summary |
+| `search_audit_events` | Search individual audit records for debugging and compliance evidence |
 
 ## What Gets Checked
 
