@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Hook Regression Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq curl python3
+
+      - name: Shell syntax check
+        run: |
+          bash -n scripts/pre-tool-check.sh
+          bash -n scripts/post-tool-audit.sh
+
+      - name: Run hook regression tests (mock server)
+        run: |
+          chmod +x tests/test-hooks.sh scripts/*.sh
+          ./tests/test-hooks.sh
+
+      - name: Validate plugin structure
+        run: |
+          # Required files must exist
+          test -f .claude-plugin/plugin.json || (echo "Missing plugin.json" && exit 1)
+          test -f .mcp.json || (echo "Missing .mcp.json" && exit 1)
+          test -f hooks/hooks.json || (echo "Missing hooks.json" && exit 1)
+          test -f scripts/pre-tool-check.sh || (echo "Missing pre-tool-check.sh" && exit 1)
+          test -f scripts/post-tool-audit.sh || (echo "Missing post-tool-audit.sh" && exit 1)
+
+          # plugin.json must be valid JSON
+          jq . .claude-plugin/plugin.json > /dev/null || (echo "Invalid plugin.json" && exit 1)
+          jq . .mcp.json > /dev/null || (echo "Invalid .mcp.json" && exit 1)
+          jq . hooks/hooks.json > /dev/null || (echo "Invalid hooks.json" && exit 1)
+
+          # Scripts must be executable
+          test -x scripts/pre-tool-check.sh || (echo "pre-tool-check.sh not executable" && exit 1)
+          test -x scripts/post-tool-audit.sh || (echo "post-tool-audit.sh not executable" && exit 1)
+
+          echo "✅ Plugin structure valid"
