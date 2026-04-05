@@ -81,7 +81,7 @@ case "$TOOL_NAME" in
     # scan the command itself — the PII is in the input, not the output.
     if [ -z "$OUTPUT_TEXT" ] || [ "$OUTPUT_TEXT" = "null" ]; then
       COMMAND=$(echo "$TOOL_INPUT" | jq -r '.command // empty' 2>/dev/null || echo "")
-      if echo "$COMMAND" | grep -qE '>\s*/|>>\s*/' ; then
+      if echo "$COMMAND" | grep -qE '>>?\s*\S' ; then
         OUTPUT_TEXT="$COMMAND"
       fi
     fi
