@@ -42,6 +42,9 @@ export AXONFLOW_AUTH=""  # empty for community mode (no Basic auth needed)
 ### Launch Claude Code with plugin
 
 ```bash
+# CLAUDE_PLUGIN_ROOT must be set — --plugin-dir does not set it automatically,
+# and hooks need it to find their scripts.
+export CLAUDE_PLUGIN_ROOT=/path/to/axonflow-claude-plugin
 claude --plugin-dir /path/to/axonflow-claude-plugin
 ```
 
