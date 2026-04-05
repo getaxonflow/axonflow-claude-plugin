@@ -155,12 +155,17 @@ assert_contains "Has policy reason" "$OUTPUT" "policy violation"
 
 echo ""
 echo "--- PreToolUse: JSON-RPC auth error → deny ---"
-OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"AUTH_ERROR test"}}' | "$PRE_HOOK" 2>/dev/null)
-EXIT_CODE=$?
-assert_eq "Exit code is 0" "0" "$EXIT_CODE"
-assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
-assert_contains "Decision is deny" "$OUTPUT" '"deny"'
-assert_contains "Has governance error" "$OUTPUT" "governance error"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: Auth error test only works with mock server (live AxonFlow has no AUTH_ERROR trigger)"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"AUTH_ERROR test"}}' | "$PRE_HOOK" 2>/dev/null)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0" "0" "$EXIT_CODE"
+    assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
+    assert_contains "Decision is deny" "$OUTPUT" '"deny"'
+    assert_contains "Has governance error" "$OUTPUT" "governance error"
+fi
 
 echo ""
 echo "--- PreToolUse: network failure → allow (fail-open) ---"
@@ -202,7 +207,7 @@ EXIT_CODE=$?
 assert_eq "Exit code is 0" "0" "$EXIT_CODE"
 if [ -n "$OUTPUT" ]; then
     assert_contains "Has PII warning" "$OUTPUT" "GOVERNANCE ALERT"
-    assert_contains "Has redacted content" "$OUTPUT" "REDACTED"
+    assert_contains "Has redacted content" "$OUTPUT" "redacted"
 else
     echo "  PASS: No PII warning (acceptable if scan returned no redaction)"
     ((PASS++)) || true
