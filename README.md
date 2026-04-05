@@ -115,7 +115,7 @@ AxonFlow's system policies cover:
 axonflow-claude-plugin/
 ├── .claude-plugin/
 │   └── plugin.json        # Plugin metadata
-├── .mcp.json               # MCP server connection (5 governance tools)
+├── .mcp.json               # MCP server connection (6 governance tools)
 ├── hooks/
 │   └── hooks.json          # PreToolUse + PostToolUse hook definitions
 ├── scripts/
@@ -128,6 +128,8 @@ axonflow-claude-plugin/
 
 - [AxonFlow Documentation](https://docs.getaxonflow.com)
 - [Claude Code Integration Guide](https://docs.getaxonflow.com/docs/integration/claude-code/)
+- [Anthropic Computer Use Guide](https://docs.getaxonflow.com/docs/integration/computer-use/)
+- [Claude Agent SDK Guide](https://docs.getaxonflow.com/docs/integration/claude-agent-sdk/)
 - [Policy Enforcement](https://docs.getaxonflow.com/docs/mcp/policy-enforcement/)
 - [Self-Hosted Deployment](https://docs.getaxonflow.com/docs/deployment/self-hosted/)
 - [Security Best Practices](https://docs.getaxonflow.com/docs/security/best-practices/)
