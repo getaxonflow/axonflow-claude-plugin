@@ -15,6 +15,7 @@ fi
 
 ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
 AUTH="${AXONFLOW_AUTH:-}"
+REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-5}"
 
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then
@@ -44,7 +45,7 @@ TRUNCATED_OUTPUT=$(echo "$TOOL_RESPONSE" | jq -c '.' 2>/dev/null | cut -c1-500 |
 
 # 1. Record audit entry (fire-and-forget, background)
 (
-  curl -s --max-time 5 -X POST "${ENDPOINT}/api/v1/mcp-server" \
+  curl -s --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST "${ENDPOINT}/api/v1/mcp-server" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
     "${AUTH_HEADER[@]}" \
@@ -101,7 +102,7 @@ case "$TOOL_NAME" in
 esac
 
 if [ -n "$OUTPUT_TEXT" ] && [ "$OUTPUT_TEXT" != "null" ]; then
-  SCAN_RESPONSE=$(curl -s --max-time 5 -X POST "${ENDPOINT}/api/v1/mcp-server" \
+  SCAN_RESPONSE=$(curl -s --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST "${ENDPOINT}/api/v1/mcp-server" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
     "${AUTH_HEADER[@]}" \

@@ -68,6 +68,9 @@ export AXONFLOW_AUTH=$(echo -n "your-client-id:your-client-secret" | base64)
 
 # Custom endpoint (default: http://localhost:8080)
 export AXONFLOW_ENDPOINT=http://your-axonflow-host:8080
+
+# Optional: increase hook HTTP timeout for remote deployments (default: 8s pre, 5s post)
+export AXONFLOW_TIMEOUT_SECONDS=12
 ```
 
 ## What Happens Automatically
@@ -84,6 +87,14 @@ Governed tools: `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP tools (`mcp
 - AxonFlow unreachable (network failure) → fail-open, tool execution continues
 - AxonFlow auth/config error → fail-closed, tool call denied until configuration is fixed
 - PostToolUse failures → never block (audit and PII scan are best-effort)
+
+## Operational Tuning
+
+Use `AXONFLOW_TIMEOUT_SECONDS` to increase or decrease the hook HTTP timeout when AxonFlow is running remotely, behind a VPN, or on a slower network path.
+
+- PreToolUse defaults to 8 seconds when the variable is unset
+- PostToolUse defaults to 5 seconds when the variable is unset
+- Setting `AXONFLOW_TIMEOUT_SECONDS` applies the same timeout to all hook calls
 
 ## MCP Tools (Also Available for Explicit Use)
 
@@ -134,6 +145,10 @@ axonflow-claude-plugin/
 - [Self-Hosted Deployment](https://docs.getaxonflow.com/docs/deployment/self-hosted/)
 - [Security Best Practices](https://docs.getaxonflow.com/docs/security/best-practices/)
 - [Source Code](https://github.com/getaxonflow/axonflow)
+
+## Telemetry
+
+This Claude Code plugin runs locally and does not send a direct telemetry ping to AxonFlow checkpoint services. Telemetry behavior for your self-hosted AxonFlow deployment and SDKs is documented separately at [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
 
 ## License
 

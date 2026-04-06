@@ -20,6 +20,7 @@ fi
 
 ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
 AUTH="${AXONFLOW_AUTH:-}"
+REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-8}"
 
 # Build auth header array safely (avoids word-splitting)
 AUTH_HEADER=()
@@ -80,7 +81,7 @@ if [ -z "$STATEMENT" ] || [ "$STATEMENT" = "null" ] || [ "$STATEMENT" = "{}" ]; 
 fi
 
 # Call AxonFlow check_policy via MCP server
-RESPONSE=$(curl -s --max-time 8 -X POST "${ENDPOINT}/api/v1/mcp-server" \
+RESPONSE=$(curl -s --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST "${ENDPOINT}/api/v1/mcp-server" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   "${AUTH_HEADER[@]}" \
@@ -148,7 +149,7 @@ POLICIES_EVALUATED=$(echo "$TOOL_RESULT" | jq -r '.policies_evaluated // 0' 2>/d
 if [ "$ALLOWED" = "false" ]; then
   # Record the blocked attempt in the audit trail (fire-and-forget).
   # This ensures blocked events appear in audit search and compliance reports.
-  curl -s --max-time 5 -X POST "${ENDPOINT}/api/v1/mcp-server" \
+  curl -s --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST "${ENDPOINT}/api/v1/mcp-server" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
     "${AUTH_HEADER[@]}" \
