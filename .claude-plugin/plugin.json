@@ -9,5 +9,6 @@
   "homepage": "https://docs.getaxonflow.com/docs/integration/claude-code/",
   "repository": "https://github.com/getaxonflow/axonflow-claude-plugin",
   "keywords": ["governance", "security", "pii", "audit", "compliance", "policy-enforcement"],
-  "license": "MIT"
+  "license": "MIT",
+  "logo": "assets/logo.png"
 }
