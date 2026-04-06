@@ -1,0 +1,12 @@
+{
+  "name": "axonflow",
+  "owner": {
+    "name": "AxonFlow"
+  },
+  "plugins": [
+    {
+      "name": "axonflow",
+      "source": "./"
+    }
+  ]
+}
