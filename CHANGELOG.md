@@ -1,13 +1,5 @@
 # Changelog
 
-## [Unreleased]
-
-### Security
-
-- Pinned all GitHub Actions to immutable commit SHAs to prevent supply chain attacks.
-- Added Dependabot configuration for weekly GitHub Actions updates.
-- Added explicit `permissions: contents: read` to test workflow (least privilege).
-
 ## [0.2.0] - 2026-04-06
 
 ### Added
@@ -19,6 +11,12 @@
 ### Changed
 
 - README now clarifies that the Claude Code plugin itself does not send direct telemetry pings; telemetry settings apply to the underlying AxonFlow deployment and SDKs.
+
+### Security
+
+- Pinned all GitHub Actions to immutable commit SHAs to prevent supply chain attacks.
+- Added Dependabot configuration for weekly GitHub Actions updates.
+- Added explicit `permissions: contents: read` to test workflow (least privilege).
 
 ## [0.1.0] - 2026-04-05
 
