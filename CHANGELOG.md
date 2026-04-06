@@ -1,10 +1,11 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-04-06
 
 ### Added
 
 - `AXONFLOW_TIMEOUT_SECONDS` environment variable to tune Claude Code hook HTTP timeouts for remote or high-latency AxonFlow deployments.
+- Plugin logo for marketplace and directory listings.
 
 ### Changed
 
