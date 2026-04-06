@@ -1,14 +1,21 @@
 {
   "name": "axonflow",
   "description": "Policy enforcement, PII detection, and audit trails for Claude Code. Govern tool execution, scan outputs for sensitive data, and maintain compliance-grade records of every action.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "AxonFlow",
     "url": "https://getaxonflow.com"
   },
   "homepage": "https://docs.getaxonflow.com/docs/integration/claude-code/",
   "repository": "https://github.com/getaxonflow/axonflow-claude-plugin",
-  "keywords": ["governance", "security", "pii", "audit", "compliance", "policy-enforcement"],
+  "keywords": [
+    "governance",
+    "security",
+    "pii",
+    "audit",
+    "compliance",
+    "policy-enforcement"
+  ],
   "license": "MIT",
   "logo": "assets/logo.png"
 }
