@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- `AXONFLOW_TIMEOUT_SECONDS` environment variable to tune Claude Code hook HTTP timeouts for remote or high-latency AxonFlow deployments.
+
+### Changed
+
+- README now clarifies that the Claude Code plugin itself does not send direct telemetry pings; telemetry settings apply to the underlying AxonFlow deployment and SDKs.
+
 ## [0.1.0] - 2026-04-05
 
 ### Added
