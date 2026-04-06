@@ -6,6 +6,7 @@
 
 - `AXONFLOW_TIMEOUT_SECONDS` environment variable to tune Claude Code hook HTTP timeouts for remote or high-latency AxonFlow deployments.
 - Plugin logo for marketplace and directory listings.
+- `SECURITY.md` with plugin-specific vulnerability reporting guidance.
 
 ### Changed
 
