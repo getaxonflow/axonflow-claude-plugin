@@ -71,8 +71,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         args = params.get('arguments', {})
         statement = args.get('statement', '')
 
-        # Simulate different responses based on statement content
-        if 'AUTH_ERROR' in statement:
+        # Simulate different responses based on statement content.
+        # v0.3.1: additional trigger strings for the v0.3.0 decision matrix
+        # that was untested.
+        if 'FAIL_CLOSED_METHOD' in statement:
+            resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32601, 'message': 'Method not found'}}
+        elif 'FAIL_CLOSED_PARAMS' in statement:
+            resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32602, 'message': 'Invalid params'}}
+        elif 'FAIL_OPEN_INTERNAL' in statement:
+            resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32603, 'message': 'Internal error'}}
+        elif 'FAIL_OPEN_PARSE' in statement:
+            resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32700, 'message': 'Parse error'}}
+        elif 'FAIL_OPEN_UNKNOWN' in statement:
+            resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -99999, 'message': 'Unknown code'}}
+        elif 'AUTH_ERROR' in statement:
             # JSON-RPC auth error
             resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32001, 'message': 'Authentication failed'}}
         elif 'BLOCKED' in statement:
@@ -175,6 +187,64 @@ OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo test"}}' | AXON
 EXIT_CODE=$?
 assert_eq "Exit code is 0 (fail-open)" "0" "$EXIT_CODE"
 assert_empty "No output (silent allow on network failure)" "$OUTPUT"
+
+# v0.3.1 decision-matrix coverage (review finding H3)
+# Claude Code hooks use JSON output with permissionDecision, not exit 2.
+
+echo ""
+echo "--- PreToolUse: -32601 method not found → deny ---"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"FAIL_CLOSED_METHOD"}}' | "$PRE_HOOK" 2>/dev/null)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0" "0" "$EXIT_CODE"
+    assert_contains "Decision is deny" "$OUTPUT" '"deny"'
+    assert_contains "Has governance blocked" "$OUTPUT" "governance blocked"
+fi
+
+echo ""
+echo "--- PreToolUse: -32602 invalid params → deny ---"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"FAIL_CLOSED_PARAMS"}}' | "$PRE_HOOK" 2>/dev/null)
+    assert_contains "Decision is deny" "$OUTPUT" '"deny"'
+fi
+
+echo ""
+echo "--- PreToolUse: -32603 internal → exit 0 (fail-open, no deny) ---"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"FAIL_OPEN_INTERNAL"}}' | "$PRE_HOOK" 2>/dev/null)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0 (fail-open on -32603)" "0" "$EXIT_CODE"
+    assert_empty "No output (no deny decision)" "$OUTPUT"
+fi
+
+echo ""
+echo "--- PreToolUse: -32700 parse error → exit 0 (fail-open) ---"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"FAIL_OPEN_PARSE"}}' | "$PRE_HOOK" 2>/dev/null)
+    assert_eq "Exit code is 0 (fail-open on -32700)" "0" "$?"
+fi
+
+echo ""
+echo "--- PreToolUse: unknown error code → exit 0 (fail-open) ---"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"FAIL_OPEN_UNKNOWN"}}' | "$PRE_HOOK" 2>/dev/null)
+    assert_eq "Exit code is 0 (fail-open on unknown code)" "0" "$?"
+fi
 
 echo ""
 echo "--- PreToolUse: empty tool_name → allow ---"
