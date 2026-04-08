@@ -23,7 +23,7 @@
       "homepage": "https://docs.getaxonflow.com/docs/integration/claude-code/",
       "repository": "https://github.com/getaxonflow/axonflow-claude-plugin",
       "license": "MIT",
-      "category": "Security",
+      "category": "security",
       "keywords": [
         "governance",
         "security",
