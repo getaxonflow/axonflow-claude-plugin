@@ -164,7 +164,7 @@ else
     assert_eq "Exit code is 0" "0" "$EXIT_CODE"
     assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
     assert_contains "Decision is deny" "$OUTPUT" '"deny"'
-    assert_contains "Has governance error" "$OUTPUT" "governance error"
+    assert_contains "Has governance blocked" "$OUTPUT" "governance blocked"
 fi
 
 echo ""
