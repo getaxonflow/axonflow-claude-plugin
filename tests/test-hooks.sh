@@ -56,15 +56,96 @@ assert_empty() {
 # --- Mock MCP Server ---
 # A tiny HTTP server that returns configurable JSON-RPC responses.
 
+assert_file_exists() {
+    local desc="$1" path="$2"
+    if [ -f "$path" ]; then
+        echo "  PASS: $desc"
+        ((PASS++)) || true
+    else
+        echo "  FAIL: $desc (file not found: $path)"
+        ((FAIL++)) || true
+    fi
+}
+
+assert_file_not_exists() {
+    local desc="$1" path="$2"
+    if [ ! -f "$path" ]; then
+        echo "  PASS: $desc"
+        ((PASS++)) || true
+    else
+        echo "  FAIL: $desc (file should not exist: $path)"
+        ((FAIL++)) || true
+    fi
+}
+
+assert_json_field() {
+    local desc="$1" json="$2" field="$3" expected="${4:-}"
+    local val
+    val=$(echo "$json" | jq -r ".$field // empty" 2>/dev/null || echo "")
+    if [ -z "$val" ]; then
+        echo "  FAIL: $desc (field .$field missing or empty)"
+        ((FAIL++)) || true
+    elif [ -n "$expected" ] && [ "$val" != "$expected" ]; then
+        echo "  FAIL: $desc (.$field = '$val', expected '$expected')"
+        ((FAIL++)) || true
+    else
+        echo "  PASS: $desc"
+        ((PASS++)) || true
+    fi
+}
+
+# --- Mock MCP Server ---
+# A tiny HTTP server that returns configurable JSON-RPC responses.
+# Also handles /health and /v1/ping for telemetry tests.
+
+TELEMETRY_CAPTURE_FILE=""
+
 start_mock_server() {
+    TELEMETRY_CAPTURE_FILE=$(mktemp)
     # Python mock server that responds based on the statement content
     python3 -c "
 import http.server, json, sys
 
+TELEMETRY_FILE = '$TELEMETRY_CAPTURE_FILE'
+
 class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/health':
+            resp = {'version': '7.0.1', 'status': 'healthy'}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(resp).encode())
+        elif self.path == '/v1/ping/last':
+            try:
+                with open(TELEMETRY_FILE, 'r') as f:
+                    data = f.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(data.encode())
+            except:
+                self.send_response(404)
+                self.end_headers()
+        else:
+            self.send_response(404)
+            self.end_headers()
+
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
-        body = json.loads(self.rfile.read(length)) if length > 0 else {}
+        raw = self.rfile.read(length) if length > 0 else b''
+
+        # Telemetry ping endpoint
+        if self.path == '/v1/ping':
+            with open(TELEMETRY_FILE, 'w') as f:
+                f.write(raw.decode('utf-8', errors='replace'))
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(b'{\"ok\":true}')
+            return
+
+        body = json.loads(raw) if raw else {}
 
         params = body.get('params', {})
         tool_name = params.get('name', '')
@@ -125,6 +206,9 @@ stop_mock_server() {
         kill "$MOCK_PID" 2>/dev/null || true
         wait "$MOCK_PID" 2>/dev/null || true
     fi
+    if [ -n "$TELEMETRY_CAPTURE_FILE" ] && [ -f "$TELEMETRY_CAPTURE_FILE" ]; then
+        rm -f "$TELEMETRY_CAPTURE_FILE"
+    fi
 }
 
 # --- Setup ---
@@ -143,6 +227,12 @@ fi
 
 export AXONFLOW_ENDPOINT="$ENDPOINT"
 export AXONFLOW_AUTH="$AUTH"
+
+# Suppress telemetry during hook tests — telemetry-ping.sh is backgrounded
+# from pre-tool-check.sh, so without this, every hook test would attempt a
+# real ping to checkpoint.getaxonflow.com. The dedicated telemetry test
+# section below explicitly unsets this to test the telemetry path.
+export DO_NOT_TRACK=1
 
 echo ""
 
@@ -288,6 +378,205 @@ echo "--- PostToolUse: failed tool → still audits silently ---"
 OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"false"},"tool_response":{"stdout":"","stderr":"error","exitCode":1}}' | "$POST_HOOK" 2>/dev/null)
 EXIT_CODE=$?
 assert_eq "Exit code is 0 (never blocks)" "0" "$EXIT_CODE"
+
+# ============================================================
+# Telemetry Tests (v0.4.0)
+# ============================================================
+
+TELEMETRY_SCRIPT="$PLUGIN_DIR/scripts/telemetry-ping.sh"
+ORIGINAL_HOME="$HOME"
+ORIGINAL_DNT="${DO_NOT_TRACK:-}"
+
+# Helper: create isolated HOME for telemetry tests
+setup_telemetry_test() {
+    TEST_HOME=$(mktemp -d)
+    export HOME="$TEST_HOME"
+    # Ensure opt-out env vars are clear (dev shells often set DO_NOT_TRACK=1)
+    unset DO_NOT_TRACK 2>/dev/null || true
+    unset AXONFLOW_TELEMETRY 2>/dev/null || true
+    # Clear any previous telemetry capture
+    echo "" > "$TELEMETRY_CAPTURE_FILE" 2>/dev/null || true
+}
+
+teardown_telemetry_test() {
+    export HOME="$ORIGINAL_HOME"
+    # Restore DO_NOT_TRACK if it was set before tests
+    if [ -n "${ORIGINAL_DNT:-}" ]; then
+        export DO_NOT_TRACK="$ORIGINAL_DNT"
+    fi
+    rm -rf "$TEST_HOME" 2>/dev/null || true
+}
+
+if [ "${1:-}" != "--live" ]; then
+
+echo ""
+echo "--- Telemetry: first invocation creates stamp file ---"
+setup_telemetry_test
+"$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 1
+assert_file_exists "Stamp file created" "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: subsequent invocation skips ---"
+setup_telemetry_test
+mkdir -p "$TEST_HOME/.cache/axonflow"
+echo "existing-id" > "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
+echo "" > "$TELEMETRY_CAPTURE_FILE"
+"$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 1
+CAPTURED=$(cat "$TELEMETRY_CAPTURE_FILE" 2>/dev/null || echo "")
+CAPTURED_TRIMMED=$(echo "$CAPTURED" | tr -d '[:space:]')
+assert_eq "No telemetry ping sent (stamp exists)" "" "$CAPTURED_TRIMMED"
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: DO_NOT_TRACK=1 suppresses ---"
+setup_telemetry_test
+DO_NOT_TRACK=1 "$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 1
+assert_file_not_exists "No stamp file when opted out" "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: AXONFLOW_TELEMETRY=off suppresses ---"
+setup_telemetry_test
+AXONFLOW_TELEMETRY=off "$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 1
+assert_file_not_exists "No stamp file when opted out" "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: failure does not block hook ---"
+setup_telemetry_test
+OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo hello"}}' | \
+    AXONFLOW_CHECKPOINT_URL="http://127.0.0.1:19998/v1/ping" "$PRE_HOOK" 2>/dev/null)
+EXIT_CODE=$?
+assert_eq "Hook exits 0 despite telemetry failure" "0" "$EXIT_CODE"
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: stamp directory auto-created ---"
+setup_telemetry_test
+# Ensure no .cache dir exists
+rmdir "$TEST_HOME/.cache" 2>/dev/null || true
+"$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 1
+assert_file_exists "Stamp dir and file created" "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: payload has required fields ---"
+setup_telemetry_test
+export AXONFLOW_CHECKPOINT_URL="http://127.0.0.1:$MOCK_PORT/v1/ping"
+"$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 2
+PAYLOAD=$(cat "$TELEMETRY_CAPTURE_FILE" 2>/dev/null || echo "{}")
+assert_json_field "Has sdk field" "$PAYLOAD" "sdk"
+assert_json_field "Has sdk_version field" "$PAYLOAD" "sdk_version"
+assert_json_field "Has os field" "$PAYLOAD" "os"
+assert_json_field "Has arch field" "$PAYLOAD" "arch"
+assert_json_field "Has runtime_version field" "$PAYLOAD" "runtime_version"
+assert_json_field "Has instance_id field" "$PAYLOAD" "instance_id"
+unset AXONFLOW_CHECKPOINT_URL
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: sdk field is claude-code-plugin ---"
+setup_telemetry_test
+export AXONFLOW_CHECKPOINT_URL="http://127.0.0.1:$MOCK_PORT/v1/ping"
+"$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 2
+PAYLOAD=$(cat "$TELEMETRY_CAPTURE_FILE" 2>/dev/null || echo "{}")
+assert_json_field "sdk is claude-code-plugin" "$PAYLOAD" "sdk" "claude-code-plugin"
+unset AXONFLOW_CHECKPOINT_URL
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: custom AXONFLOW_CHECKPOINT_URL respected ---"
+setup_telemetry_test
+echo "" > "$TELEMETRY_CAPTURE_FILE"
+export AXONFLOW_CHECKPOINT_URL="http://127.0.0.1:$MOCK_PORT/v1/ping"
+"$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 2
+PAYLOAD=$(cat "$TELEMETRY_CAPTURE_FILE" 2>/dev/null || echo "")
+PAYLOAD_TRIMMED=$(echo "$PAYLOAD" | tr -d '[:space:]')
+if [ -n "$PAYLOAD_TRIMMED" ]; then
+    echo "  PASS: Custom URL received the ping"
+    ((PASS++)) || true
+else
+    echo "  FAIL: Custom URL did not receive the ping"
+    ((FAIL++)) || true
+fi
+unset AXONFLOW_CHECKPOINT_URL
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: instance_id persists in stamp file ---"
+setup_telemetry_test
+export AXONFLOW_CHECKPOINT_URL="http://127.0.0.1:$MOCK_PORT/v1/ping"
+"$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 1
+STAMP_CONTENT=$(cat "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent" 2>/dev/null || echo "")
+if echo "$STAMP_CONTENT" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+    echo "  PASS: Stamp file contains UUID"
+    ((PASS++)) || true
+else
+    echo "  FAIL: Stamp file does not contain valid UUID (got: '$STAMP_CONTENT')"
+    ((FAIL++)) || true
+fi
+unset AXONFLOW_CHECKPOINT_URL
+teardown_telemetry_test
+
+fi  # end mock-only telemetry tests
+
+# ============================================================
+# UTF-8 Truncation Tests (v0.4.0)
+# ============================================================
+
+echo ""
+echo "--- UTF-8: emoji in Write content does not corrupt ---"
+OUTPUT=$(echo '{"tool_name":"Write","tool_input":{"file_path":"/tmp/test","content":"Hello world 🔥🔥🔥 test content"}}' | "$PRE_HOOK" 2>/dev/null)
+EXIT_CODE=$?
+assert_eq "Exit code is 0 with emoji content" "0" "$EXIT_CODE"
+
+echo ""
+echo "--- UTF-8: multi-byte chars at boundary preserved ---"
+# Create content that is exactly 1999 ASCII chars + a multi-byte char
+LONG_CONTENT=$(printf '%0.sa' $(seq 1 1999))
+LONG_CONTENT="${LONG_CONTENT}€"
+OUTPUT=$(echo "{\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":\"/tmp/test\",\"content\":\"${LONG_CONTENT}\"}}" | "$PRE_HOOK" 2>/dev/null)
+EXIT_CODE=$?
+assert_eq "Exit code is 0 with boundary multi-byte char" "0" "$EXIT_CODE"
+
+# ============================================================
+# Static Checks (v0.4.0)
+# ============================================================
+
+echo ""
+echo "--- Static: post-tool-audit uses -sS consistently ---"
+# Match 'curl -s ' but not 'curl -sS' — use regex: 'curl -s ' not followed by S
+BARE_S_COUNT=$(grep -cE 'curl -s [^S]' "$PLUGIN_DIR/scripts/post-tool-audit.sh" || true)
+SS_COUNT=$(grep -c 'curl -sS' "$PLUGIN_DIR/scripts/post-tool-audit.sh" || true)
+assert_eq "No bare 'curl -s ' in post-tool-audit" "0" "$BARE_S_COUNT"
+if [ "$SS_COUNT" -gt 0 ]; then
+    echo "  PASS: post-tool-audit has $SS_COUNT 'curl -sS' calls"
+    ((PASS++)) || true
+else
+    echo "  FAIL: post-tool-audit has no 'curl -sS' calls"
+    ((FAIL++)) || true
+fi
+
+echo ""
+echo "--- Static: hooks.json timeouts are all >= 15 ---"
+MIN_TIMEOUT=$(jq '[.. | .timeout? // empty] | min' "$PLUGIN_DIR/hooks/hooks.json" 2>/dev/null || echo "0")
+if [ "$MIN_TIMEOUT" -ge 15 ] 2>/dev/null; then
+    echo "  PASS: Minimum hook timeout is $MIN_TIMEOUT (>= 15)"
+    ((PASS++)) || true
+else
+    echo "  FAIL: Minimum hook timeout is $MIN_TIMEOUT (expected >= 15)"
+    ((FAIL++)) || true
+fi
 
 # ============================================================
 # Summary

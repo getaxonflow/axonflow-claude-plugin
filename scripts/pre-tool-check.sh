@@ -28,6 +28,10 @@ if [ -n "$AUTH" ]; then
   AUTH_HEADER=(-H "Authorization: Basic $AUTH")
 fi
 
+# Telemetry: fire-and-forget on first invocation (stamp file guard inside script)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+"${SCRIPT_DIR}/telemetry-ping.sh" </dev/null &
+
 # Read hook input from stdin
 INPUT=$(cat)
 
@@ -52,12 +56,12 @@ case "$TOOL_NAME" in
     # .claude/settings, MEMORY.md) are scoped via integration activation,
     # so they only fire when the relevant integration is enabled.
     FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
-    CONTENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | head -c 2000)
+    CONTENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | cut -c1-2000)
     STATEMENT="${FILE_PATH}"$'\n'"${CONTENT}"
     ;;
   Edit)
     FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
-    NEW_STRING=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | head -c 2000)
+    NEW_STRING=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | cut -c1-2000)
     STATEMENT="${FILE_PATH}"$'\n'"${NEW_STRING}"
     ;;
   NotebookEdit)

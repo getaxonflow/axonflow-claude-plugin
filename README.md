@@ -131,7 +131,8 @@ axonflow-claude-plugin/
 │   └── hooks.json          # PreToolUse + PostToolUse hook definitions
 ├── scripts/
 │   ├── pre-tool-check.sh   # Policy evaluation before tool execution
-│   └── post-tool-audit.sh  # Audit logging + PII scan after execution
+│   ├── post-tool-audit.sh  # Audit logging + PII scan after execution
+│   └── telemetry-ping.sh   # Anonymous telemetry (fires once per install)
 └── README.md
 ```
 
@@ -148,7 +149,13 @@ axonflow-claude-plugin/
 
 ## Telemetry
 
-This Claude Code plugin runs locally and does not send a direct telemetry ping to AxonFlow checkpoint services. Telemetry behavior for your self-hosted AxonFlow deployment and SDKs is documented separately at [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
+This plugin sends an anonymous telemetry ping on first hook invocation to help us understand usage patterns. The ping includes: plugin version, platform info (OS, architecture, bash version), and AxonFlow platform version. No PII, no tool arguments, no policy data.
+
+Opt out:
+- `DO_NOT_TRACK=1` (standard)
+- `AXONFLOW_TELEMETRY=off`
+
+The telemetry ping fires once per install (guarded by a stamp file at `$HOME/.cache/axonflow/claude-code-plugin-telemetry-sent`). Delete the stamp file to re-send on next hook invocation. Full telemetry documentation: [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
 
 ## License
 

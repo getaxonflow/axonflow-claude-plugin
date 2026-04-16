@@ -147,6 +147,29 @@ curl -s -X POST $AXONFLOW_ENDPOINT/api/v1/mcp-server \
 
 ---
 
+## 5. Telemetry Verification
+
+### 5.1 First-invocation telemetry ping
+1. Delete stamp file: `rm -f ~/.cache/axonflow/claude-code-plugin-telemetry-sent`
+2. Run any governed tool (e.g., `echo hello` via Bash)
+3. Verify stamp file created: `ls -la ~/.cache/axonflow/claude-code-plugin-telemetry-sent`
+4. Verify stamp file contains a UUID: `cat ~/.cache/axonflow/claude-code-plugin-telemetry-sent`
+
+### 5.2 Subsequent invocations skip telemetry
+1. With stamp file present, run another governed tool
+2. No new HTTP request to checkpoint (verify via network monitor or AxonFlow logs)
+
+### 5.3 Opt-out verification (DO_NOT_TRACK)
+1. Delete stamp file: `rm -f ~/.cache/axonflow/claude-code-plugin-telemetry-sent`
+2. Set `export DO_NOT_TRACK=1`
+3. Run a governed tool
+4. Verify NO stamp file created: `ls ~/.cache/axonflow/claude-code-plugin-telemetry-sent` should fail
+
+### 5.4 Opt-out verification (AXONFLOW_TELEMETRY)
+1. Same as 5.3 but with `export AXONFLOW_TELEMETRY=off` instead of `DO_NOT_TRACK`
+
+---
+
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
