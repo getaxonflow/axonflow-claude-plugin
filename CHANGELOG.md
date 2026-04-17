@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.5.0] - 2026-04-17 — Plugin Batch 1: Richer Approval Context
+
+### Added
+
+- **Richer block context in hook responses.** When the AxonFlow platform is
+  v7.1.0+, block responses returned to Claude Code now include the
+  `decision_id`, `risk_level`, and override availability. Users hitting a
+  block see either `[decision: <id>, risk: <level>, active override: <ov>]`
+  or a hint to call the `explain_decision` MCP tool. Older platforms see
+  the prior terse message — fields are omitted when not returned.
+- **Access to platform MCP tools** `explain_decision`, `create_override`,
+  `delete_override`, `list_overrides` — already exposed by the agent's MCP
+  server (no plugin change required to surface them). Agents can call these
+  from within Claude Code via the MCP client once the platform supports them.
+
+### Compatibility
+
+Companion to platform v7.1.0 (ADR-042 + ADR-043) and SDKs at v5.4.0 /
+v6.4.0. Back-compatible with older platforms — enriched fields are
+absent, and the hook falls back to the v0.4.0 block-reason format.
+
 ## [0.4.0] - 2026-04-16
 
 ### Added
