@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.0] - 2026-04-17 — Plugin Batch 1: Richer Approval Context
+## [0.5.0] - 2026-04-18
 
 ### Added
 
@@ -11,15 +11,14 @@
   or a hint to call the `explain_decision` MCP tool. Older platforms see
   the prior terse message — fields are omitted when not returned.
 - **Access to platform MCP tools** `explain_decision`, `create_override`,
-  `delete_override`, `list_overrides` — already exposed by the agent's MCP
-  server (no plugin change required to surface them). Agents can call these
-  from within Claude Code via the MCP client once the platform supports them.
+  `delete_override`, `list_overrides` — exposed by the agent's MCP server.
+  Agents can call these from within Claude Code via the MCP client.
 
 ### Compatibility
 
-Companion to platform v7.1.0 (ADR-042 + ADR-043) and SDKs at v5.4.0 /
-v6.4.0. Back-compatible with older platforms — enriched fields are
-absent, and the hook falls back to the v0.4.0 block-reason format.
+Companion to platform v7.1.0 and SDKs at v5.4.0 / v6.4.0. Back-compatible
+with older platforms — enriched fields are absent, and the hook falls back
+to the v0.4.0 block-reason format.
 
 ## [0.4.0] - 2026-04-16
 
