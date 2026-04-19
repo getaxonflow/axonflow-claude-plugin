@@ -157,7 +157,7 @@ and asserts the hook returns the Claude Code `permissionDecision: deny`
 shape with Plugin Batch 1 richer-context markers (`decision:`, `risk:`)
 in the reason text. Exits 0 with a `SKIP:` message if no stack is
 reachable so the script is safe to run anywhere. In CI, run manually via
-`workflow_dispatch` or by applying the `run-e2e` label to a PR.
+`workflow_dispatch` with a reachable endpoint.
 
 Full install-and-use matrix (explain-decision, override lifecycle, audit
 filter parity, cache invalidation) lives in `axonflow-enterprise/tests/e2e/plugin-batch-1/claude-install/`.

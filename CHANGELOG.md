@@ -9,9 +9,10 @@
   hook returns `permissionDecision: deny` with Plugin Batch 1
   richer-context markers in the reason text. Exits 0 (`SKIP:`) when no
   stack is reachable.
-- **`.github/workflows/smoke-e2e.yml`** — `workflow_dispatch` + PR label
-  (`run-e2e`) triggered job running the smoke scenario. Off by default
-  so normal PRs don't need a live stack.
+- **`.github/workflows/smoke-e2e.yml`** — `workflow_dispatch` triggered job running the smoke scenario.
+  Requires an operator-supplied endpoint (GitHub-hosted runners have no
+  local stack), so not wired to PR events — PR smoke gating needs a
+  self-hosted runner with a live stack.
 
 Full install-and-use matrix (explain, override lifecycle, audit filter
 parity, cache invalidation) lives in `axonflow-enterprise/tests/e2e/plugin-batch-1/claude-install/`.
