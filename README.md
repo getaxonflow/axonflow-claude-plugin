@@ -136,6 +136,32 @@ axonflow-claude-plugin/
 └── README.md
 ```
 
+## Testing
+
+Unit tests (hook regression, mock server — no live stack needed):
+
+```bash
+./tests/test-hooks.sh
+```
+
+Smoke E2E (requires a live AxonFlow stack at `localhost:8080`):
+
+```bash
+# Start a stack via axonflow-enterprise (see its setup-e2e-testing.sh)
+bash tests/e2e/smoke-block-context.sh
+```
+
+The smoke scenario installs the plugin's `pre-tool-check.sh` against a
+running platform, feeds a SQLi-bearing Bash tool invocation through it,
+and asserts the hook returns the Claude Code `permissionDecision: deny`
+shape with Plugin Batch 1 richer-context markers (`decision:`, `risk:`)
+in the reason text. Exits 0 with a `SKIP:` message if no stack is
+reachable so the script is safe to run anywhere. In CI, run manually via
+`workflow_dispatch` with a reachable endpoint.
+
+Full install-and-use matrix (explain-decision, override lifecycle, audit
+filter parity, cache invalidation) lives in `axonflow-enterprise/tests/e2e/plugin-batch-1/claude-install/`.
+
 ## Links
 
 - [AxonFlow Documentation](https://docs.getaxonflow.com)
