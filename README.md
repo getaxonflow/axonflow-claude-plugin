@@ -171,7 +171,7 @@ In addition to automatic hooks, the agent's MCP server exposes **10 tools** Clau
 | `check_policy` | Evaluate specific inputs against policies |
 | `check_output` | Scan specific content for PII/secrets |
 | `audit_tool_call` | Record an additional audit entry |
-| `list_policies` | List active governance policies (static + dynamic) |
+| `list_policies` | List active governance policies (system + tenant) |
 | `get_policy_stats` | Summary of governance activity |
 | `search_audit_events` | Search individual audit records for debugging and compliance evidence |
 
@@ -254,7 +254,7 @@ bash tests/e2e/smoke-block-context.sh
 
 The smoke scenario installs the plugin's `pre-tool-check.sh` against a running platform, feeds a SQLi-bearing Bash tool invocation through it, and asserts the hook returns the `permissionDecision: deny` shape with the richer-context markers (`decision:`, `risk:`) in the reason text. Exits 0 with `SKIP:` if no stack is reachable. Run in CI via `workflow_dispatch` when a reachable endpoint is configured.
 
-Full install-and-use matrix (explain-decision, override lifecycle, audit-filter parity, cache invalidation) lives in `axonflow-enterprise/tests/e2e/plugin-batch-1/claude-install/`.
+For the broader validation story — explain-decision, override lifecycle, audit-filter parity, cache invalidation — see the [Claude Code integration guide](https://docs.getaxonflow.com/docs/integration/claude-code/) and the [governance test scenarios](https://docs.getaxonflow.com/docs/testing/) documentation.
 
 ---
 
