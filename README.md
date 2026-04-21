@@ -1,187 +1,287 @@
 # AxonFlow Plugin for Claude Code
 
-Policy enforcement, PII detection, and audit trails for Claude Code.
+**Runtime governance for Claude Code: block dangerous commands before they run, scan every tool output for PII and secrets, and keep a compliance-grade audit trail — without leaving your terminal.**
 
-This plugin automatically governs tool calls — checking policies before execution, scanning outputs for PII/secrets after execution, and recording audit entries for compliance. No manual intervention needed.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed)](https://docs.claude.com/claude-code/plugins)
 
-**Governed tools:** `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP server tools (`mcp__*`). Read-only tools (`Read`, `Glob`, `Grep`) are not governed by default since they don't modify state or send data externally.
+> **→ Full integration walkthrough:** **[docs.getaxonflow.com/docs/integration/claude-code](https://docs.getaxonflow.com/docs/integration/claude-code/)** — architecture, policy examples, latency numbers, troubleshooting, and the 10 MCP tools the platform exposes.
 
-## How It Works
+---
+
+## Why you'd add this
+
+Claude Code is Anthropic's official CLI — a fast, agentic coding assistant that edits files, runs shell commands, and calls MCP servers. It's excellent at developer productivity. It was never designed to be the layer where your security and compliance team lives.
+
+The gaps start surfacing the moment Claude Code moves from one developer's laptop to a team or production setting:
+
+| Production requirement | Claude Code alone | With this plugin |
+|---|---|---|
+| Policy enforcement before tool execution | Hooks available, no governance logic | **80+ built-in policies evaluated on every governed tool call** |
+| Dangerous command blocking (`rm -rf /`, reverse shells, `curl \| bash`) | Not addressed | **Blocked before execution with decision context** |
+| PII / secrets detection in tool outputs | Developer responsibility | **Auto-scan; Claude is instructed to use redacted version** |
+| SQL-injection detection on MCP queries | MCP server's problem | **30+ patterns evaluated on every MCP tool call** |
+| Compliance-grade audit trail | Session logs, not compliance-formatted | **Every governed call recorded with policies, decision, duration** |
+| Decision explainability after a block | Generic hook failure message | **`decision_id` surfaced in deny reason; `explain_decision` MCP tool returns the full record** |
+| Self-service, time-bounded exceptions | Not available | **`create_override` with mandatory justification, fully audited** |
+| Cloud metadata / SSRF / path traversal blocking | Not addressed | **Built in** |
+
+You get all of that with zero change to how developers use Claude Code. Hooks fire automatically, the deny message tells you why, MCP tools are there when you want to investigate or unblock yourself.
+
+---
+
+## How it works
 
 ```
-Claude selects a tool (Bash, Write, MCP, etc.)
+Claude selects a tool (Bash, Write, Edit, NotebookEdit, mcp__*)
     │
     ▼
 PreToolUse hook fires automatically
     │ → check_policy("claude_code.Bash", "rm -rf /")
     │
-    ├─ BLOCKED → Claude receives denial reason, tool never runs
+    ├─ BLOCKED → Claude receives denial reason with decision_id + risk_level,
+    │            can call explain_decision / create_override to unblock
     │
     └─ ALLOWED → Tool executes normally
                       │
                       ▼
                  PostToolUse hook fires automatically
-                      │ → audit_tool_call(tool, input, output)  [background]
+                      │ → audit_tool_call(tool, input, output)  [non-blocking]
                       │ → check_output(tool result for PII/secrets)
                       │
-                      ├─ PII found → Claude instructed to use redacted version
-                      │              (original output is not transformed — Claude
-                      │               receives guidance to not expose raw PII)
-                      └─ Clean → Silent, no interruption
+                      ├─ Sensitive data found → Claude instructed to use
+                      │                          redacted version in its reply
+                      └─ Clean → Silent
 ```
 
-## Prerequisites
+**Governed tools:** `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP server tools (`mcp__*`). Read-only tools (`Read`, `Glob`, `Grep`) are not governed by default — they don't modify state or send data externally.
 
-AxonFlow must be running. No LLM provider keys needed — Claude Code handles LLM calls, AxonFlow only enforces policies and records audit trails.
+**Fail behavior:**
+- AxonFlow unreachable (network) → fail-open, tool execution continues
+- AxonFlow auth/config error → fail-closed, tool call denied until config is fixed
+- PostToolUse failures → never block (audit and PII scan are best-effort)
+
+---
+
+## Where this kicks in during real coding
+
+### 1. The MCP data-exposure problem
+
+A developer connects an MCP server to a production database for debugging. Claude Code queries customer records. Results flow through the conversation with PII intact. Session logs exist but they aren't structured for compliance queries.
+
+**With the plugin:** `check_policy` fires before the MCP query runs (SQL injection scan, policy scan), `check_output` scans the result for SSN / credit card / email / phone / API keys, and `audit_tool_call` records the full interaction with matched policies and decision ID.
+
+### 2. The accidental production change
+
+A developer types *"fix the database issue."* Claude Code picks a `Bash` tool and runs a migration against prod. The command ran because nothing stopped it.
+
+**With the plugin:** a dynamic policy scoped to production patterns matches, the call is denied with a decision ID, and Claude surfaces the deny reason in the REPL. A developer can call `explain_decision` to see exactly which policy family triggered, then `create_override` with justification if they have the authority — all without leaving the session.
+
+### 3. The security-review block
+
+A team wants to deploy Claude Code at scale and security says no: *"No policy enforcement on MCP queries, PII flows through conversations unchecked, bash commands aren't governed, audit trail isn't compliance-ready, no approval gates."*
+
+**With the plugin:** every one of those gaps is filled at the plugin layer. The productivity surface doesn't change.
+
+---
+
+## Install
+
+### Add this repo as a custom marketplace (recommended)
+
+```
+/plugin marketplace add getaxonflow/axonflow-claude-plugin
+/plugin install axonflow
+```
+
+### Or load locally for testing
+
+```bash
+git clone https://github.com/getaxonflow/axonflow-claude-plugin.git
+claude --plugin-dir /path/to/axonflow-claude-plugin
+```
+
+> The plugin has been submitted to the official Anthropic marketplace (`anthropics/claude-plugins-official`) and is currently in Anthropic's review queue. Until it appears in `/plugin > Discover`, use one of the install methods above.
+
+---
+
+## Start AxonFlow
+
+The plugin connects to AxonFlow, a self-hosted governance platform. AxonFlow must be running before the plugin loads. Everything stays on your infrastructure — **no LLM provider keys are required**. Claude Code handles every LLM call; AxonFlow only evaluates policies and records audit trails.
 
 ```bash
 git clone https://github.com/getaxonflow/axonflow.git
 cd axonflow && docker compose up -d
+
+# verify
+curl -s http://localhost:8080/health | jq .
 ```
 
-Verify: `curl -s http://localhost:8080/health | jq .`
+See [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) for production deployment options.
 
-## Install
-
-Load locally for testing:
-
-```bash
-claude --plugin-dir /path/to/this/directory
-```
-
-Or once listed in the official marketplace:
-
-```bash
-/plugin install axonflow@claude-plugins-official
-```
+---
 
 ## Configure
-
-Set environment variables for authentication:
 
 ```bash
 # Community mode (local development) — any values work
 export AXONFLOW_AUTH=$(echo -n "demo:demo-secret" | base64)
 
-# Enterprise mode — use your AxonFlow client credentials
+# Enterprise mode — your AxonFlow client credentials
 export AXONFLOW_AUTH=$(echo -n "your-client-id:your-client-secret" | base64)
 
 # Custom endpoint (default: http://localhost:8080)
 export AXONFLOW_ENDPOINT=http://your-axonflow-host:8080
 
-# Optional: increase hook HTTP timeout for remote deployments (default: 8s pre, 5s post)
+# Optional: increase hook timeout for remote / VPN'd deployments
+# (PreToolUse default 8s, PostToolUse default 5s)
 export AXONFLOW_TIMEOUT_SECONDS=12
 ```
 
-## What Happens Automatically
+In community mode (`DEPLOYMENT_MODE=community`), leave `AXONFLOW_AUTH` unset and the plugin will still work.
 
-| Event | Hook | Action |
-|-------|------|--------|
-| Before governed tool call | PreToolUse | `check_policy` evaluates tool inputs against governance policies |
-| After governed tool call | PostToolUse | `audit_tool_call` records execution in compliance audit trail |
-| After governed tool call | PostToolUse | `check_output` scans output for PII/secrets, instructs Claude to use redacted version |
+---
 
-Governed tools: `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP tools (`mcp__*`).
+## What gets checked
 
-**Fail behavior:**
-- AxonFlow unreachable (network failure) → fail-open, tool execution continues
-- AxonFlow auth/config error → fail-closed, tool call denied until configuration is fixed
-- PostToolUse failures → never block (audit and PII scan are best-effort)
+AxonFlow ships with **80+ built-in system policies** that apply to Claude Code automatically. No configuration required — new policies added to the platform are immediately enforced in every session.
 
-## Operational Tuning
+| Category | Coverage |
+|---|---|
+| **Dangerous commands** | Reverse shells (`nc -e`, `bash -i`, `/dev/tcp/`), `rm -rf /`, `dd if=`, `curl \| bash`, credential file access (`cat ~/.ssh/`, `cat ~/.aws/`), path traversal |
+| **SQL injection** | 30+ patterns including UNION injection, stacked queries, auth bypass, encoding tricks |
+| **PII detection** | SSN, credit card, Aadhaar, PAN, email, phone, NRIC/FIN (Singapore), and more — with redaction |
+| **Secrets exposure** | API keys, connection strings, hardcoded credentials, code secrets |
+| **SSRF** | Cloud metadata endpoint (`169.254.169.254`) and internal-network blocking |
+| **Prompt injection** | Instruction override, jailbreak attempts, role hijacking |
+| **Claude Code-specific** | `.claude/settings.json` write protection, `.claude/hooks/*.json` modification warnings (enabled via `AXONFLOW_INTEGRATIONS=claude-code`) |
 
-Use `AXONFLOW_TIMEOUT_SECONDS` to increase or decrease the hook HTTP timeout when AxonFlow is running remotely, behind a VPN, or on a slower network path.
+Custom policies are easy — `POST /api/v1/dynamic-policies` or the Customer Portal. See [Policy Enforcement](https://docs.getaxonflow.com/docs/mcp/policy-enforcement/).
 
-- PreToolUse defaults to 8 seconds when the variable is unset
-- PostToolUse defaults to 5 seconds when the variable is unset
-- Setting `AXONFLOW_TIMEOUT_SECONDS` applies the same timeout to all hook calls
+---
 
-## MCP Tools (Also Available for Explicit Use)
+## The 10 MCP tools Claude can call
 
-In addition to automatic hooks, Claude can call these tools explicitly:
+In addition to automatic hooks, the agent's MCP server exposes **10 tools** Claude can call directly. All served by the platform at `/api/v1/mcp-server` — the plugin's `.mcp.json` just points Claude there. New platform tools are immediately available.
+
+### Governance (6)
 
 | Tool | Purpose |
 |------|---------|
 | `check_policy` | Evaluate specific inputs against policies |
 | `check_output` | Scan specific content for PII/secrets |
-| `audit_tool_call` | Record additional audit entries |
-| `list_policies` | List active governance policies (static + dynamic) |
-| `get_policy_stats` | Get governance activity summary |
+| `audit_tool_call` | Record an additional audit entry |
+| `list_policies` | List active governance policies (system + tenant) |
+| `get_policy_stats` | Summary of governance activity |
 | `search_audit_events` | Search individual audit records for debugging and compliance evidence |
 
-## What Gets Checked
+### Decision explainability & session overrides (4)
 
-AxonFlow's system policies cover:
+| Tool | Purpose |
+|------|---------|
+| `explain_decision` | Return the full [DecisionExplanation](https://docs.getaxonflow.com/docs/governance/explainability/) for a decision ID |
+| `create_override` | Create a time-bounded, audit-logged session override (mandatory justification) |
+| `delete_override` | Revoke an active session override |
+| `list_overrides` | List active overrides scoped to the caller's tenant |
 
-- **Dangerous commands**: reverse shells, `rm -rf`, `curl | bash`, credential access
-- **PII detection**: SSN, credit card, email, phone, Aadhaar, PAN — with redaction
-- **SQL injection**: 37+ detection patterns
-- **Secrets exposure**: API keys, connection strings, code secrets
-- **SSRF**: cloud metadata endpoint and internal network blocking
-- **Path traversal**: workspace escape pattern detection
+**The inline-unblock workflow:** a policy block → the deny reason includes `decision_id` and `risk_level` → the developer asks Claude to call `explain_decision` → if the decision is overridable, `create_override` unblocks with justification. No separate admin surface, full audit trail.
 
-## Plugin Structure
+See [Session Overrides](https://docs.getaxonflow.com/docs/governance/overrides/).
+
+---
+
+## Latency
+
+| Operation | Typical overhead |
+|-----------|-----------------|
+| Policy pre-check | 2–5 ms |
+| PII detection | 1–3 ms |
+| SQL-injection scan | 1–2 ms |
+| Audit write (async) | 0 ms (non-blocking) |
+| **Total per-tool overhead** | **3–10 ms** |
+
+Imperceptible in interactive Claude Code sessions.
+
+---
+
+## Sister integrations
+
+Same governance platform, same 80+ policies, same 10 MCP tools — different agent hosts:
+
+| Integration | Repo | Docs |
+|---|---|---|
+| Claude Code | *this repo* | [claude-code](https://docs.getaxonflow.com/docs/integration/claude-code/) |
+| Anthropic Computer Use | Docs-only integration (uses the Agent SDK pattern) | [computer-use](https://docs.getaxonflow.com/docs/integration/computer-use/) |
+| Claude Agent SDK | Docs-only integration | [claude-agent-sdk](https://docs.getaxonflow.com/docs/integration/claude-agent-sdk/) |
+| Cursor IDE | [axonflow-cursor-plugin](https://github.com/getaxonflow/axonflow-cursor-plugin) | [cursor](https://docs.getaxonflow.com/docs/integration/cursor/) |
+| OpenAI Codex | [axonflow-codex-plugin](https://github.com/getaxonflow/axonflow-codex-plugin) | [codex](https://docs.getaxonflow.com/docs/integration/codex/) |
+| OpenClaw | [axonflow-openclaw-plugin](https://github.com/getaxonflow/axonflow-openclaw-plugin) | [openclaw](https://docs.getaxonflow.com/docs/integration/openclaw/) |
+
+---
+
+## Plugin structure
 
 ```
 axonflow-claude-plugin/
 ├── .claude-plugin/
-│   └── plugin.json        # Plugin metadata
-├── .mcp.json               # MCP server connection (6 governance tools)
+│   ├── plugin.json        # Plugin metadata
+│   └── marketplace.json   # Marketplace listing
+├── .mcp.json              # MCP server connection (points at the platform)
 ├── hooks/
-│   └── hooks.json          # PreToolUse + PostToolUse hook definitions
+│   └── hooks.json         # PreToolUse + PostToolUse hook definitions
 ├── scripts/
-│   ├── pre-tool-check.sh   # Policy evaluation before tool execution
-│   ├── post-tool-audit.sh  # Audit logging + PII scan after execution
-│   └── telemetry-ping.sh   # Anonymous telemetry (fires once per install)
-└── README.md
+│   ├── pre-tool-check.sh    # Policy evaluation before tool execution
+│   ├── post-tool-audit.sh   # Audit + PII scan after execution
+│   ├── mcp-auth-headers.sh  # Basic-auth header generation for MCP
+│   └── telemetry-ping.sh    # Anonymous telemetry (fires once per install)
+└── tests/
+    ├── test-hooks.sh        # Hook regression (mock server)
+    ├── E2E_TESTING_PLAYBOOK.md
+    └── e2e/                 # Smoke E2E against live AxonFlow
 ```
+
+---
 
 ## Testing
 
-Unit tests (hook regression, mock server — no live stack needed):
-
 ```bash
+# Hook regression tests (no live stack required)
 ./tests/test-hooks.sh
-```
 
-Smoke E2E (requires a live AxonFlow stack at `localhost:8080`):
-
-```bash
-# Start a stack via axonflow-enterprise (see its setup-e2e-testing.sh)
+# Smoke E2E against a live AxonFlow at localhost:8080
 bash tests/e2e/smoke-block-context.sh
 ```
 
-The smoke scenario installs the plugin's `pre-tool-check.sh` against a
-running platform, feeds a SQLi-bearing Bash tool invocation through it,
-and asserts the hook returns the Claude Code `permissionDecision: deny`
-shape with Plugin Batch 1 richer-context markers (`decision:`, `risk:`)
-in the reason text. Exits 0 with a `SKIP:` message if no stack is
-reachable so the script is safe to run anywhere. In CI, run manually via
-`workflow_dispatch` with a reachable endpoint.
+The smoke scenario installs the plugin's `pre-tool-check.sh` against a running platform, feeds a SQLi-bearing Bash tool invocation through it, and asserts the hook returns the `permissionDecision: deny` shape with the richer-context markers (`decision:`, `risk:`) in the reason text. Exits 0 with `SKIP:` if no stack is reachable. Run in CI via `workflow_dispatch` when a reachable endpoint is configured.
 
-Full install-and-use matrix (explain-decision, override lifecycle, audit
-filter parity, cache invalidation) lives in `axonflow-enterprise/tests/e2e/plugin-batch-1/claude-install/`.
+For the broader validation story — explain-decision, override lifecycle, audit-filter parity, cache invalidation — see the [Claude Code integration guide](https://docs.getaxonflow.com/docs/integration/claude-code/) and the [governance test scenarios](https://docs.getaxonflow.com/docs/testing/) documentation.
 
-## Links
-
-- [AxonFlow Documentation](https://docs.getaxonflow.com)
-- [Claude Code Integration Guide](https://docs.getaxonflow.com/docs/integration/claude-code/)
-- [Anthropic Computer Use Guide](https://docs.getaxonflow.com/docs/integration/computer-use/)
-- [Claude Agent SDK Guide](https://docs.getaxonflow.com/docs/integration/claude-agent-sdk/)
-- [Policy Enforcement](https://docs.getaxonflow.com/docs/mcp/policy-enforcement/)
-- [Self-Hosted Deployment](https://docs.getaxonflow.com/docs/deployment/self-hosted/)
-- [Security Best Practices](https://docs.getaxonflow.com/docs/security/best-practices/)
-- [Source Code](https://github.com/getaxonflow/axonflow)
+---
 
 ## Telemetry
 
-This plugin sends an anonymous telemetry ping on first hook invocation to help us understand usage patterns. The ping includes: plugin version, platform info (OS, architecture, bash version), and AxonFlow platform version. No PII, no tool arguments, no policy data.
+Anonymous one-time ping on first hook invocation: plugin version, OS, architecture, bash version, AxonFlow platform version. **Never** tool arguments, message contents, or policy data.
 
 Opt out:
 - `DO_NOT_TRACK=1` (standard)
 - `AXONFLOW_TELEMETRY=off`
 
-The telemetry ping fires once per install (guarded by a stamp file at `$HOME/.cache/axonflow/claude-code-plugin-telemetry-sent`). Delete the stamp file to re-send on next hook invocation. Full telemetry documentation: [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
+Guarded by a stamp file at `$HOME/.cache/axonflow/claude-code-plugin-telemetry-sent` (delete to re-send). Details: [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
+
+---
+
+## Links
+
+- **[Claude Code Integration Guide](https://docs.getaxonflow.com/docs/integration/claude-code/)** — the full walkthrough (recommended starting point)
+- [AxonFlow Documentation](https://docs.getaxonflow.com)
+- [Policy Enforcement](https://docs.getaxonflow.com/docs/mcp/policy-enforcement/)
+- [Decision Explainability](https://docs.getaxonflow.com/docs/governance/explainability/)
+- [Session Overrides](https://docs.getaxonflow.com/docs/governance/overrides/)
+- [Self-Hosted Deployment](https://docs.getaxonflow.com/docs/deployment/self-hosted/)
+- [Security Best Practices](https://docs.getaxonflow.com/docs/security/best-practices/)
+- [Anthropic Computer Use Integration](https://docs.getaxonflow.com/docs/integration/computer-use/)
+- [Claude Agent SDK Integration](https://docs.getaxonflow.com/docs/integration/claude-agent-sdk/)
+- [AxonFlow source](https://github.com/getaxonflow/axonflow)
 
 ## License
 
