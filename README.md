@@ -3,7 +3,7 @@
 **Runtime governance for Claude Code: block dangerous commands before they run, scan every tool output for PII and secrets, and keep a compliance-grade audit trail — without leaving your terminal.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Claude Code Marketplace](https://img.shields.io/badge/Claude%20Code-marketplace-7c3aed)](https://docs.claude.com/claude-code/plugins)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-7c3aed)](https://docs.claude.com/claude-code/plugins)
 
 > **→ Full integration walkthrough:** **[docs.getaxonflow.com/docs/integration/claude-code](https://docs.getaxonflow.com/docs/integration/claude-code/)** — architecture, policy examples, latency numbers, troubleshooting, and the 10 MCP tools the platform exposes.
 
@@ -87,18 +87,21 @@ A team wants to deploy Claude Code at scale and security says no: *"No policy en
 
 ## Install
 
-### Via the official Anthropic marketplace (recommended)
+### Add this repo as a custom marketplace (recommended)
 
 ```
-/plugin install axonflow@claude-plugins-official
+/plugin marketplace add getaxonflow/axonflow-claude-plugin
+/plugin install axonflow
 ```
 
-### Local install for testing
+### Or load locally for testing
 
 ```bash
 git clone https://github.com/getaxonflow/axonflow-claude-plugin.git
 claude --plugin-dir /path/to/axonflow-claude-plugin
 ```
+
+> The plugin has been submitted to the official Anthropic marketplace (`anthropics/claude-plugins-official`) and is currently in Anthropic's review queue. Until it appears in `/plugin > Discover`, use one of the install methods above.
 
 ---
 
@@ -208,8 +211,8 @@ Same governance platform, same 80+ policies, same 10 MCP tools — different age
 | Integration | Repo | Docs |
 |---|---|---|
 | Claude Code | *this repo* | [claude-code](https://docs.getaxonflow.com/docs/integration/claude-code/) |
-| Anthropic Computer Use | [claude-agent-sdk docs](https://docs.getaxonflow.com/docs/integration/computer-use/) | [computer-use](https://docs.getaxonflow.com/docs/integration/computer-use/) |
-| Claude Agent SDK | [docs only](https://docs.getaxonflow.com/docs/integration/claude-agent-sdk/) | [claude-agent-sdk](https://docs.getaxonflow.com/docs/integration/claude-agent-sdk/) |
+| Anthropic Computer Use | Docs-only integration (uses the Agent SDK pattern) | [computer-use](https://docs.getaxonflow.com/docs/integration/computer-use/) |
+| Claude Agent SDK | Docs-only integration | [claude-agent-sdk](https://docs.getaxonflow.com/docs/integration/claude-agent-sdk/) |
 | Cursor IDE | [axonflow-cursor-plugin](https://github.com/getaxonflow/axonflow-cursor-plugin) | [cursor](https://docs.getaxonflow.com/docs/integration/cursor/) |
 | OpenAI Codex | [axonflow-codex-plugin](https://github.com/getaxonflow/axonflow-codex-plugin) | [codex](https://docs.getaxonflow.com/docs/integration/codex/) |
 | OpenClaw | [axonflow-openclaw-plugin](https://github.com/getaxonflow/axonflow-openclaw-plugin) | [openclaw](https://docs.getaxonflow.com/docs/integration/openclaw/) |
@@ -227,12 +230,14 @@ axonflow-claude-plugin/
 ├── hooks/
 │   └── hooks.json         # PreToolUse + PostToolUse hook definitions
 ├── scripts/
-│   ├── pre-tool-check.sh  # Policy evaluation before tool execution
-│   ├── post-tool-audit.sh # Audit + PII scan after execution
-│   └── telemetry-ping.sh  # Anonymous telemetry (fires once per install)
+│   ├── pre-tool-check.sh    # Policy evaluation before tool execution
+│   ├── post-tool-audit.sh   # Audit + PII scan after execution
+│   ├── mcp-auth-headers.sh  # Basic-auth header generation for MCP
+│   └── telemetry-ping.sh    # Anonymous telemetry (fires once per install)
 └── tests/
-    ├── test-hooks.sh      # Hook regression (mock server)
-    └── e2e/               # Smoke E2E against live AxonFlow
+    ├── test-hooks.sh        # Hook regression (mock server)
+    ├── E2E_TESTING_PLAYBOOK.md
+    └── e2e/                 # Smoke E2E against live AxonFlow
 ```
 
 ---
