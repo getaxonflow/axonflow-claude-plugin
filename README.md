@@ -263,8 +263,8 @@ For the broader validation story — explain-decision, override lifecycle, audit
 Anonymous one-time ping on first hook invocation: plugin version, OS, architecture, bash version, AxonFlow platform version. **Never** tool arguments, message contents, or policy data.
 
 Opt out:
-- `DO_NOT_TRACK=1` (standard)
-- `AXONFLOW_TELEMETRY=off`
+- `AXONFLOW_TELEMETRY=off` (canonical)
+- `DO_NOT_TRACK=1` — still honored for backward compatibility, but **deprecated** and scheduled for removal after 2026-05-05 in the next major release. The plugin emits a one-time warning when `DO_NOT_TRACK=1` is the active control and `AXONFLOW_TELEMETRY=off` is not also set.
 
 Guarded by a stamp file at `$HOME/.cache/axonflow/claude-code-plugin-telemetry-sent` (delete to re-send). Details: [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
 
