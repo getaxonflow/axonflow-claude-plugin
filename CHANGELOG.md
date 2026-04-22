@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.5.2] - 2026-04-22
+
+### Deprecated
+
+- `DO_NOT_TRACK=1` as an AxonFlow telemetry opt-out — scheduled for removal after 2026-05-05 in the next major release. Use `AXONFLOW_TELEMETRY=off` instead. The plugin's `telemetry-ping.sh` emits a one-time stderr warning when `DO_NOT_TRACK=1` is the active control and `AXONFLOW_TELEMETRY=off` is not also set.
+
 ## [0.5.1] - 2026-04-19
 
 ### Added
