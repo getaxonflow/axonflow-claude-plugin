@@ -1,0 +1,48 @@
+name: Install Smoke
+
+# Install-to-use smoke gate (parity with axonflow-openclaw-plugin#56,
+# QF-17). Stages the plugin to a clean tmp dir, validates the file
+# list and hooks.json paths, spawns a stub MCP server, exercises the
+# pre-tool-check.sh hook against it for both deny (SQLi) and allow
+# (benign) paths, and asserts wire-shape Plugin Batch 1 fields surface
+# in the deny output.
+#
+# Catches the class of regressions tests/test-hooks.sh misses because
+# it runs against the source tree, not what gets installed:
+#   - hooks.json paths broken after install (wrong relative path)
+#   - Required files missing from the install payload
+#   - Scripts referencing files relative to source tree that don't
+#     exist in the installed location
+#
+# No external network or live AxonFlow stack required.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Install-to-use smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DO_NOT_TRACK: "1"
+      AXONFLOW_TELEMETRY: "off"
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq jq curl python3
+
+      - name: Run install-to-use smoke harness
+        run: |
+          chmod +x tests/install-smoke/*.sh tests/install-smoke/*.py scripts/*.sh
+          bash tests/install-smoke/run.sh
