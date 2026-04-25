@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **Wire-shape contract gate** (`.github/workflows/wire-shape-contract.yml`). CI fails any PR that introduces drift between the plugin's bash-script `jq` accesses on AxonFlow MCP responses and the AxonFlow agent's OpenAPI spec at the SHA pinned in `tests/fixtures/wire-shape-baseline.json`. Drift NOT covered by the baseline blocks merge. The pinned SHA is itself guarded by a `spec-pin-bump` PR label so a single PR can't both move the SHA and silence drift. Mirrors the four SDK gates and the OpenClaw plugin gate per ADR-047. Initial baseline grandfathers the Plugin Batch 1 fields (`decision_id`, `risk_level`, `policy_matches`, `override_available`, `override_existing_id`) and `redacted_message` that the agent emits but the spec hasn't documented yet — burndown via platform-side spec follow-ups.
+- **`CONTRIBUTING.md`** with the baseline burndown-or-justify policy, Cat C three-bucket framework, and language-targeted reasoning for why the bash gate's shape differs from the SDK gates.
+
 ## [0.5.2] - 2026-04-22
 
 ### Deprecated
