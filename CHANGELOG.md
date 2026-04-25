@@ -2,11 +2,6 @@
 
 ## [Unreleased]
 
-### Added
-
-- **Wire-shape contract gate** (`.github/workflows/wire-shape-contract.yml`). CI fails any PR that introduces drift between the plugin's bash-script `jq` accesses on AxonFlow MCP responses and the AxonFlow agent's OpenAPI spec at the SHA pinned in `tests/fixtures/wire-shape-baseline.json`. Drift NOT covered by the baseline blocks merge. The pinned SHA is itself guarded by a `spec-pin-bump` PR label so a single PR can't both move the SHA and silence drift. Mirrors the four SDK gates and the OpenClaw plugin gate per ADR-047.
-- **Install-to-use smoke gate** (`.github/workflows/install-smoke.yml`). CI now stages the plugin to a clean tmp dir on every PR (mirroring `claude plugin install`), validates the file list, confirms `hooks.json` command paths resolve to staged scripts, spawns a stub MCP server on a random port, and exercises `pre-tool-check.sh` against it for both deny (SQLi) and allow (benign) paths. Asserts the Plugin Batch 1 wire-shape fields (`decision_id`, `risk_level`, `override_available`) surface in the deny decision text. Catches the class of regressions `tests/test-hooks.sh` misses because it runs against the source tree, not what gets installed: broken hooks.json paths, missing files in the install payload, scripts referencing source-tree-relative paths. Mirrors axonflow-openclaw-plugin#56 (QF-17). Behavioural counterpart to the wire-shape gate above — install-smoke catches publish-path drift; wire-shape catches script-vs-spec drift.
-- **`CONTRIBUTING.md`** with the baseline burndown-or-justify policy, Cat C three-bucket framework, and language-targeted reasoning for why the bash gate's shape differs from the SDK gates.
 
 ## [0.5.2] - 2026-04-22
 
