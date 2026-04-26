@@ -85,6 +85,42 @@ A team wants to deploy Claude Code at scale and security says no: *"No policy en
 
 ---
 
+## Try AxonFlow on a real plugin rollout
+
+We're opening limited **Plugin Design Partner** slots.
+
+30-minute hook lifecycle review, policy pack scoping, override workflow design, and IDE/CLI rollout pattern walkthrough — for solo developers and small teams putting governance on Claude Code.
+
+[Apply here](https://getaxonflow.com/plugins/design-partner?utm_source=readme_plugin_claude) or email [design-partners@getaxonflow.com](mailto:design-partners@getaxonflow.com). Personal email is fine — solo developers welcome.
+
+### See AxonFlow in Action
+
+Three short videos covering different angles of the platform:
+
+- **[Community Quickstart Demo (Code + Terminal, 2.5 min)](https://youtu.be/BSqU1z0xxCo)** — governed calls, PII block, Gateway Mode with LangChain/CrewAI, and MAP from YAML
+- **[Runtime Control Demo (Portal + Workflow, 3 min)](https://youtu.be/6UatGpn7KwE)** — approvals, retry safety, execution state, and the audit viewer
+- **[Architecture Deep Dive (12 min)](https://youtu.be/Q2CZ1qnquhg)** — how the control plane works, policy enforcement flow, and multi-agent planning
+
+### Plugin Evaluation Tier (Free 90-day License)
+
+Outgrown Community on a real plugin install? Evaluation unlocks the capacity and features that matter for plugin users — without moving to Enterprise yet:
+
+| Capability | Community | Evaluation (Free) | Enterprise |
+|---|---|---|---|
+| Tenant policies | 20 | 50 | Unlimited |
+| Org-wide policies | 0 | 5 | Unlimited |
+| Audit retention | 3 days | 14 days | Up to 10 years |
+| HITL approval gates | — | 25 pending, 24h expiry | Unlimited, 24h |
+| Evidence export (CSV/JSON) | — | 5,000 records · 14d window · 3/day | Unlimited |
+| Policy simulation | — | 300/day | Unlimited |
+| Session overrides (self-service unblock) | — | — | Enterprise-only |
+
+Org-wide policies and session overrides are **Enterprise-only** — those are the actual upgrade triggers for plugin users.
+
+[Get a free Plugin Evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval)
+
+---
+
 ## Install
 
 ### Add this repo as a custom marketplace (recommended)
