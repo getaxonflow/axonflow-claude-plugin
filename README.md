@@ -85,15 +85,13 @@ A team wants to deploy Claude Code at scale and security says no: *"No policy en
 
 ---
 
-## Try AxonFlow in production
+## Try AxonFlow on a real plugin rollout
 
-We're opening limited Design Partner slots.
+We're opening limited **Plugin Design Partner** slots.
 
-Free 30-minute architecture and incident-readiness review, priority issue triage, roadmap input, and early feature access.
+30-minute hook lifecycle review, policy pack scoping, override workflow design, and IDE/CLI rollout pattern walkthrough — for solo developers and small teams putting governance on Claude Code.
 
-[Apply here](https://getaxonflow.com/design-partner?utm_source=readme_plugin_claude) or email [design-partners@getaxonflow.com](mailto:design-partners@getaxonflow.com).
-
-No commitment required. We reply within 48 hours.
+[Apply here](https://getaxonflow.com/plugins/design-partner?utm_source=readme_plugin_claude) or email [design-partners@getaxonflow.com](mailto:design-partners@getaxonflow.com). Personal email is fine — solo developers welcome.
 
 ### See AxonFlow in Action
 
@@ -103,21 +101,23 @@ Three short videos covering different angles of the platform:
 - **[Runtime Control Demo (Portal + Workflow, 3 min)](https://youtu.be/6UatGpn7KwE)** — approvals, retry safety, execution state, and the audit viewer
 - **[Architecture Deep Dive (12 min)](https://youtu.be/Q2CZ1qnquhg)** — how the control plane works, policy enforcement flow, and multi-agent planning
 
-### Evaluation Tier (Free License)
+### Plugin Evaluation Tier (Free 90-day License)
 
-Need more capacity than Community without moving to Enterprise? Evaluation uses the same core features with higher limits:
+Outgrown Community on a real plugin install? Evaluation unlocks the capacity and features that matter for plugin users — without moving to Enterprise yet:
 
-| Limit | Community | Evaluation (Free) | Enterprise |
-|-------|-----------|-------------------|------------|
+| Capability | Community | Evaluation (Free) | Enterprise |
+|---|---|---|---|
 | Tenant policies | 20 | 50 | Unlimited |
 | Org-wide policies | 0 | 5 | Unlimited |
-| Audit retention | 3 days | 14 days | 3650 days |
-| Concurrent executions | 5 | 25 | Unlimited |
-| Pending execution approvals | 5 | 25 | Unlimited |
+| Audit retention | 3 days | 14 days | Up to 10 years |
+| HITL approval gates | — | 25 pending, 24h expiry | Unlimited, 24h |
+| Evidence export (CSV/JSON) | — | 5,000 records · 14d window · 3/day | Unlimited |
+| Policy simulation | — | 300/day | Unlimited |
+| Session overrides (self-service unblock) | — | — | Enterprise-only |
 
-Concurrent executions applies to MAP and WCP executions per tenant. Pending execution approvals applies to MAP confirm/step mode and WCP approval queues.
+Numbers verified against `platform/agent/license/tier_support.go`. Org-wide policies and session overrides are **Enterprise-only** — those are the actual upgrade triggers for plugin users.
 
-[Get a free Evaluation license](https://getaxonflow.com/evaluation-license?utm_source=readme_plugin_claude_eval) · [Full feature matrix](https://docs.getaxonflow.com/docs/features/community-vs-enterprise?utm_source=readme_plugin_claude_eval)
+[Get a free Plugin Evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval)
 
 ---
 
