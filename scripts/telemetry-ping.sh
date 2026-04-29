@@ -48,11 +48,27 @@ mkdir -p -m 0700 "$STAMP_DIR" 2>/dev/null
 # Step 2: pre-lock mtime check. Cheap exit when stamp is fresh.
 NOW=$(date +%s)
 stamp_mtime() {
-  if [ -f "$STAMP_FILE" ]; then
-    stat -f %m "$STAMP_FILE" 2>/dev/null || stat -c %Y "$STAMP_FILE" 2>/dev/null || echo 0
-  else
+  if [ ! -f "$STAMP_FILE" ]; then
     echo 0
+    return
   fi
+  # GNU stat (Linux): -c %Y. BSD stat (macOS): -f %m. We can't blindly chain
+  # them with `||` because GNU `stat -f %m FILE` doesn't fail — it treats
+  # `%m` as a filesystem path and prints garbage with exit 0, which then
+  # poisons the freshness check (non-numeric → `is_fresh` returns false →
+  # the heartbeat fires every invocation). Try GNU first (CI is Linux),
+  # validate numeric, then fall back to BSD; same validation.
+  local out
+  out=$(stat -c %Y "$STAMP_FILE" 2>/dev/null) || out=""
+  case "$out" in
+    ''|*[!0-9]*) ;;
+    *) echo "$out"; return ;;
+  esac
+  out=$(stat -f %m "$STAMP_FILE" 2>/dev/null) || out=""
+  case "$out" in
+    ''|*[!0-9]*) echo 0 ;;
+    *) echo "$out" ;;
+  esac
 }
 
 is_fresh() {
