@@ -31,7 +31,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      DO_NOT_TRACK: "1"
       AXONFLOW_TELEMETRY: "off"
 
     steps:

@@ -105,8 +105,11 @@ HOOK="$STAGE_DIR/scripts/pre-tool-check.sh"
 ENDPOINT="http://127.0.0.1:$PORT"
 
 # Deny case: SQLi statement.
+# AXONFLOW_TELEMETRY=off suppresses the backgrounded telemetry-ping.sh that
+# pre-tool-check.sh fires via &. Without this, every install-smoke run leaks
+# a real ping to checkpoint.getaxonflow.com.
 DENY_INPUT='{"tool_name":"Bash","tool_input":{"command":"DROP TABLE users; --"}}'
-DENY_OUTPUT=$(echo "$DENY_INPUT" | AXONFLOW_ENDPOINT="$ENDPOINT" "$HOOK" 2>/dev/null || true)
+DENY_OUTPUT=$(echo "$DENY_INPUT" | AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_TELEMETRY=off "$HOOK" 2>/dev/null || true)
 if echo "$DENY_OUTPUT" | grep -q '"deny"'; then pass "deny path returns deny decision"
 else fail "deny path missing deny decision: $DENY_OUTPUT"
 fi
@@ -122,7 +125,7 @@ fi
 
 # Allow case: benign statement.
 ALLOW_INPUT='{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
-ALLOW_OUTPUT=$(echo "$ALLOW_INPUT" | AXONFLOW_ENDPOINT="$ENDPOINT" "$HOOK" 2>/dev/null || true)
+ALLOW_OUTPUT=$(echo "$ALLOW_INPUT" | AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_TELEMETRY=off "$HOOK" 2>/dev/null || true)
 if [ -z "$ALLOW_OUTPUT" ]; then pass "allow path returns silent (no output)"
 else fail "allow path produced unexpected output: $ALLOW_OUTPUT"
 fi
