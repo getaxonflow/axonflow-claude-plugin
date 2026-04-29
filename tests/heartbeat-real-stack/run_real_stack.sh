@@ -49,9 +49,18 @@ WORK_DIR=$(mktemp -d)
 SANDBOX_HOME=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR" "$SANDBOX_HOME"; [ -n "${SERVER_PID:-}" ] && kill "$SERVER_PID" 2>/dev/null || true' EXIT
 
-# Start the fake server. Python's stdout buffering is flushed via flush=True
-# in server.py so the readiness line lands deterministically.
-python3 "$HARNESS_DIR/server.py" "$PORT" "$WORK_DIR" >"$WORK_DIR/_server.out" 2>&1 &
+# Diagnostic: confirm python3 is actually on PATH and the server script is
+# present. macOS-arm64 GH runners have surprised us before with `python3`
+# pointing somewhere weird.
+echo "--- diagnostic: which python3 + which curl ---" >&2
+command -v python3 >&2 && python3 --version >&2 || echo "python3 missing" >&2
+command -v curl >&2 && curl --version | head -1 >&2 || echo "curl missing" >&2
+ls -la "$HARNESS_DIR/server.py" >&2
+
+# Start the fake server. PYTHONUNBUFFERED=1 makes stdout line-buffered when
+# redirected to a file (defence in depth — the file-based readiness sentinel
+# is the authoritative readiness signal anyway).
+PYTHONUNBUFFERED=1 python3 "$HARNESS_DIR/server.py" "$PORT" "$WORK_DIR" >"$WORK_DIR/_server.out" 2>&1 &
 SERVER_PID=$!
 
 # Wait for the readiness sentinel with a 30s budget. The file-based signal
