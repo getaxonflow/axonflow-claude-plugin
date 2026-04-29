@@ -300,7 +300,7 @@ Anonymous one-time ping on first hook invocation: plugin version, OS, architectu
 
 Opt out: set `AXONFLOW_TELEMETRY=off` in the environment Claude Code runs in.
 
-`DO_NOT_TRACK=1` is **not** honored as an opt-out here. The Claude Code CLI injects `DO_NOT_TRACK=1` into every hook subprocess regardless of user intent, so it cannot represent a real user choice in this context.
+`DO_NOT_TRACK` is **not** honored as an opt-out for AxonFlow telemetry. It is commonly inherited from host tools and developer environments — and in Claude Code specifically, the CLI injects `DO_NOT_TRACK=1` into every hook subprocess regardless of user intent. That makes it an unreliable expression of user intent, so AxonFlow telemetry is controlled exclusively by `AXONFLOW_TELEMETRY=off`.
 
 Guarded by a stamp file at `$HOME/.cache/axonflow/claude-code-plugin-telemetry-sent` (delete to re-send). Details: [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
 

@@ -232,7 +232,7 @@ export AXONFLOW_AUTH="$AUTH"
 # from pre-tool-check.sh, so without this, every hook test would attempt a
 # real ping to checkpoint.getaxonflow.com. The dedicated telemetry test
 # section below explicitly unsets this to test the telemetry path.
-export DO_NOT_TRACK=1
+export AXONFLOW_TELEMETRY=off
 
 echo ""
 
@@ -385,7 +385,7 @@ assert_eq "Exit code is 0 (never blocks)" "0" "$EXIT_CODE"
 
 TELEMETRY_SCRIPT="$PLUGIN_DIR/scripts/telemetry-ping.sh"
 ORIGINAL_HOME="$HOME"
-ORIGINAL_DNT="${DO_NOT_TRACK:-}"
+ORIGINAL_AXONFLOW_TELEMETRY="${AXONFLOW_TELEMETRY:-}"
 
 # Helper: create isolated HOME for telemetry tests.
 #
@@ -399,8 +399,9 @@ ORIGINAL_DNT="${DO_NOT_TRACK:-}"
 setup_telemetry_test() {
     TEST_HOME=$(mktemp -d)
     export HOME="$TEST_HOME"
-    # Ensure opt-out env vars are clear (dev shells often set DO_NOT_TRACK=1)
-    unset DO_NOT_TRACK 2>/dev/null || true
+    # Ensure the canonical opt-out env var is clear so we test the
+    # telemetry-firing path. (DO_NOT_TRACK is no longer honored for
+    # AxonFlow telemetry — it was dropped because host CLIs inject it.)
     unset AXONFLOW_TELEMETRY 2>/dev/null || true
     # Default every telemetry test to the local mock endpoint. No real
     # network fires unless a test explicitly unsets this and overrides.
@@ -412,9 +413,8 @@ setup_telemetry_test() {
 teardown_telemetry_test() {
     export HOME="$ORIGINAL_HOME"
     unset AXONFLOW_CHECKPOINT_URL
-    # Restore DO_NOT_TRACK if it was set before tests
-    if [ -n "${ORIGINAL_DNT:-}" ]; then
-        export DO_NOT_TRACK="$ORIGINAL_DNT"
+    if [ -n "${ORIGINAL_AXONFLOW_TELEMETRY:-}" ]; then
+        export AXONFLOW_TELEMETRY="$ORIGINAL_AXONFLOW_TELEMETRY"
     fi
     rm -rf "$TEST_HOME" 2>/dev/null || true
 }
@@ -443,11 +443,19 @@ assert_eq "No telemetry ping sent (stamp exists)" "" "$CAPTURED_TRIMMED"
 teardown_telemetry_test
 
 echo ""
-echo "--- Telemetry: DO_NOT_TRACK=1 suppresses ---"
+echo "--- Telemetry: DO_NOT_TRACK=1 alone does NOT suppress (host CLI injects it) ---"
 setup_telemetry_test
 DO_NOT_TRACK=1 "$TELEMETRY_SCRIPT" 2>/dev/null
 sleep 1
-assert_file_not_exists "No stamp file when opted out" "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
+assert_file_exists "Stamp file created — DNT alone is not honored" "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
+teardown_telemetry_test
+
+echo ""
+echo "--- Telemetry: AXONFLOW_TELEMETRY=off suppresses even with DO_NOT_TRACK=1 also set ---"
+setup_telemetry_test
+DO_NOT_TRACK=1 AXONFLOW_TELEMETRY=off "$TELEMETRY_SCRIPT" 2>/dev/null
+sleep 1
+assert_file_not_exists "AXONFLOW_TELEMETRY=off is the canonical opt-out and wins" "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent"
 teardown_telemetry_test
 
 echo ""

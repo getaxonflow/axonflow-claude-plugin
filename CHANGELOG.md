@@ -2,14 +2,18 @@
 
 ## [Unreleased]
 
-### Changed
+### Removed
 
-- `DO_NOT_TRACK=1` is no longer treated as a telemetry opt-out in this plugin because the host CLI injects it into hook subprocesses regardless of user intent. Use `AXONFLOW_TELEMETRY=off` to opt out.
+- **BREAKING:** `DO_NOT_TRACK=1` is no longer honored as an AxonFlow telemetry opt-out in this plugin. Use `AXONFLOW_TELEMETRY=off` instead. The Claude Code CLI injects `DO_NOT_TRACK=1` into every hook subprocess regardless of user intent, so it cannot represent a real user choice in this context.
 
 ### Fixed
 
-- Telemetry ping now actually fires once per install on Claude Code. The previous behavior silently exited at the `DO_NOT_TRACK=1` check (injected by Claude Code), so the install ping never reached the stamp-file guard.
+- Telemetry ping now fires once per install on Claude Code. The previous behavior silently exited at the `DO_NOT_TRACK=1` check (injected by Claude Code), so the install ping never reached the stamp-file guard.
 - The deprecation warning no longer leaks to stderr on every hook invocation, eliminating UX noise that previously appeared alongside policy decisions.
+
+### CI / development
+
+- Test harness (`tests/test-hooks.sh`) and CI workflows (`test.yml`, `install-smoke.yml`, `smoke-e2e.yml`) now use `AXONFLOW_TELEMETRY=off` to suppress telemetry during automated runs.
 
 
 ## [0.5.2] - 2026-04-22
