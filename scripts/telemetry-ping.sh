@@ -96,9 +96,15 @@ if [ -z "$INSTANCE_ID" ]; then
   INSTANCE_ID=$(echo "$INSTANCE_ID" | tr '[:upper:]' '[:lower:]')
 fi
 
-# Step 6: resolve endpoint. Default-when-no-config matches pre-tool-check.sh:
-# Community SaaS only when neither AXONFLOW_ENDPOINT nor AXONFLOW_AUTH is set.
-if [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
+# Step 6: resolve endpoint. AXONFLOW_MODE wins when set — pre-tool-check.sh
+# exports it before sourcing the Community-SaaS bootstrap, and the bootstrap
+# then exports AXONFLOW_AUTH but intentionally leaves AXONFLOW_ENDPOINT unset.
+# Without honoring MODE here the AUTH-set check falls into the localhost
+# branch, /health probes hit localhost, and the heartbeat ships
+# platform_version=null for real Community-SaaS users.
+if [ "${AXONFLOW_MODE:-}" = "community-saas" ]; then
+  ENDPOINT="https://try.getaxonflow.com"
+elif [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
   ENDPOINT="https://try.getaxonflow.com"
 else
   ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
@@ -117,7 +123,9 @@ else
   PLATFORM_VERSION="\"${PLATFORM_VERSION}\""
 fi
 
-if [ -n "${AXONFLOW_AUTH:-}" ]; then
+if [ "${AXONFLOW_MODE:-}" = "community-saas" ]; then
+  DEPLOYMENT_MODE="community-saas"
+elif [ -n "${AXONFLOW_AUTH:-}" ]; then
   DEPLOYMENT_MODE="production"
 else
   DEPLOYMENT_MODE="development"
