@@ -25,6 +25,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
   ENDPOINT="https://try.getaxonflow.com"
   AXONFLOW_MODE="community-saas"
+  # Test-harness override (tests/heartbeat-real-stack/). Production code
+  # paths leave AXONFLOW_HARNESS unset and the endpoint stays pinned.
+  if [ "${AXONFLOW_HARNESS:-}" = "1" ] && [ -n "${AXONFLOW_HARNESS_AGENT_ENDPOINT:-}" ]; then
+    ENDPOINT="$AXONFLOW_HARNESS_AGENT_ENDPOINT"
+  fi
 else
   ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
   AXONFLOW_MODE="self-hosted"

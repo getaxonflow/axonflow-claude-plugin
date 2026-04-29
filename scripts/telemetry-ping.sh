@@ -150,6 +150,11 @@ elif [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
 else
   ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
 fi
+# Test-harness override for /health probe (tests/heartbeat-real-stack/).
+# Production paths leave AXONFLOW_HARNESS unset.
+if [ "${AXONFLOW_HARNESS:-}" = "1" ] && [ -n "${AXONFLOW_HARNESS_AGENT_ENDPOINT:-}" ]; then
+  ENDPOINT="$AXONFLOW_HARNESS_AGENT_ENDPOINT"
+fi
 CHECKPOINT_URL="${AXONFLOW_CHECKPOINT_URL:-https://checkpoint.getaxonflow.com/v1/ping}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"

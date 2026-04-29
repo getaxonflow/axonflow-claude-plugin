@@ -50,8 +50,21 @@ REGISTRATION_FILE="${CONFIG_DIR}/try-registration.json"
 LOCK_FILE="${CONFIG_DIR}/try-registration.lock"
 LOCK_DIR="${CONFIG_DIR}/try-registration.lock.d"
 BACKOFF_FILE="${HOME}/.cache/axonflow/claude-code-plugin-register-backoff"
-ENDPOINT="https://try.getaxonflow.com"
-REGISTER_URL="${ENDPOINT}/api/v1/register"
+# NB: don't reuse the name `ENDPOINT` here — pre-tool-check.sh sources this
+# script and ENDPOINT is the agent endpoint variable in the parent. Naming
+# this BOOTSTRAP_ENDPOINT keeps the registration target separate.
+BOOTSTRAP_ENDPOINT="https://try.getaxonflow.com"
+REGISTER_URL="${BOOTSTRAP_ENDPOINT}/api/v1/register"
+
+# Test-harness override. tests/heartbeat-real-stack/run_real_stack.sh sets
+# AXONFLOW_HARNESS=1 and points AXONFLOW_HARNESS_REGISTER_URL at a localhost
+# fake to drive the bootstrap end-to-end without touching production. NOT a
+# user-facing knob — the tests/heartbeat-real-stack/ harness is the only
+# supported caller. Production code paths leave AXONFLOW_HARNESS unset and
+# the URL stays pinned to try.getaxonflow.com.
+if [ "${AXONFLOW_HARNESS:-}" = "1" ] && [ -n "${AXONFLOW_HARNESS_REGISTER_URL:-}" ]; then
+  REGISTER_URL="$AXONFLOW_HARNESS_REGISTER_URL"
+fi
 
 # Tighten the config dir at every invocation. mkdir -p -m 0700 only sets
 # mode on directories it creates, NOT on existing ones. Re-chmod is a
