@@ -5,10 +5,11 @@
 # with plugin version, platform info (OS, arch, bash version), and AxonFlow
 # platform version. No PII, no tool arguments, no policy data.
 #
-# Opt out: AXONFLOW_TELEMETRY=off (canonical)
-# Also honored for backward compatibility: DO_NOT_TRACK=1 (deprecated — removed
-# after 2026-05-05 in the next major release; warning below emits when it's the
-# active opt-out so operators can migrate)
+# Opt out: AXONFLOW_TELEMETRY=off
+#
+# Note: DO_NOT_TRACK is intentionally not honored here. The Claude Code CLI
+# injects DO_NOT_TRACK=1 into every hook subprocess regardless of user intent,
+# so it cannot represent a real opt-out signal in this context.
 #
 # Guard: stamp file at $HOME/.cache/axonflow/claude-code-plugin-telemetry-sent
 # prevents repeat pings. Delete the stamp file to re-send on next hook invocation.
@@ -20,15 +21,6 @@
 command -v curl &>/dev/null || exit 0
 command -v jq &>/dev/null || exit 0
 
-# Opt-out check (matches OpenClaw plugin's telemetry-config.ts)
-if [ "${DO_NOT_TRACK:-}" = "1" ]; then
-  # Deprecation warning — only when DO_NOT_TRACK is the active control.
-  # If AXONFLOW_TELEMETRY=off is also set, the operator has already migrated.
-  if [ "${AXONFLOW_TELEMETRY:-}" != "off" ]; then
-    echo "[AxonFlow] DO_NOT_TRACK=1 is deprecated as an AxonFlow telemetry opt-out and will be removed after 2026-05-05 in the next major release. Set AXONFLOW_TELEMETRY=off to opt out going forward. See https://docs.getaxonflow.com/docs/telemetry for details." >&2
-  fi
-  exit 0
-fi
 if [ "${AXONFLOW_TELEMETRY:-}" = "off" ]; then
   exit 0
 fi
