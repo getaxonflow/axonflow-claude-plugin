@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.6.0] - 2026-04-29 — Production, quality, and security hardening — upgrade encouraged
+## [1.0.0] - 2026-04-29 — Production, quality, and security hardening — upgrade encouraged
 
 **Upgrade strongly recommended.** Over the past month we've shipped substantial production, quality, and security hardening across the AxonFlow plugin and platform — upgrade to the latest version for a more secure, reliable, and bug-free experience.
 
