@@ -7,6 +7,8 @@
 
 > **→ Full integration walkthrough:** **[docs.getaxonflow.com/docs/integration/claude-code](https://docs.getaxonflow.com/docs/integration/claude-code/)** — architecture, policy examples, latency numbers, troubleshooting, and the 10 MCP tools the platform exposes.
 
+> **Upgrade strongly recommended.** AxonFlow ships substantial monthly security and quality hardening; staying on the latest major is the security-supported release line. [Latest release](https://github.com/getaxonflow/axonflow-claude-plugin/releases/latest) · [Security advisories](https://github.com/getaxonflow/axonflow-claude-plugin/security/advisories)
+
 ---
 
 ## Why you'd add this
