@@ -4,7 +4,7 @@
 # Queries the AxonFlow agent's /health endpoint (advertised since
 # platform v7.5.0 via axonflow-enterprise#1764) and compares the
 # plugin's runtime version to plugin_compatibility.min_plugin_version
-# ["claude"]. Logs a single warning to stderr if the plugin is below
+# ["claude-code"]. Logs a single warning to stderr if the plugin is below
 # the floor the platform expects. Mirrors the SDK pattern that has run
 # on every SDK client construction since v4.8.0.
 #
@@ -37,7 +37,10 @@ mkdir -p "$STAMP_DIR" 2>/dev/null || exit 0
 ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-PLUGIN_ID="claude"
+# Canonical plugin id matches `integration_activation.go::knownIntegrations`
+# in axonflow-enterprise. Hyphenated form is intentional — internal source
+# of truth uses "claude-code", not "claude".
+PLUGIN_ID="claude-code"
 
 PLUGIN_VERSION=$(jq -r '.version // empty' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null)
 if [ -z "$PLUGIN_VERSION" ]; then

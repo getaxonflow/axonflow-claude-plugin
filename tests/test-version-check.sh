@@ -23,7 +23,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CHECK_SCRIPT="$PLUGIN_DIR/scripts/version-check.sh"
-PLUGIN_ID="claude"
+PLUGIN_ID="claude-code"
 
 if [ ! -x "$CHECK_SCRIPT" ]; then
   echo "FAIL: $CHECK_SCRIPT not executable"
