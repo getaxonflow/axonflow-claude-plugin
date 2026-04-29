@@ -7,6 +7,8 @@
 
 > **→ Full integration walkthrough:** **[docs.getaxonflow.com/docs/integration/claude-code](https://docs.getaxonflow.com/docs/integration/claude-code/)** — architecture, policy examples, latency numbers, troubleshooting, and the 10 MCP tools the platform exposes.
 
+> **Upgrade strongly recommended.** Over the past month we've shipped substantial production, quality, and security hardening across the AxonFlow plugin and platform — see the [v0.6.0 release notes](./CHANGELOG.md), the per-plugin advisory [`GHSA-qgqh-qcq7-hqhm`](https://github.com/getaxonflow/axonflow-claude-plugin/security/advisories/GHSA-qgqh-qcq7-hqhm), and the consolidated platform advisory [`GHSA-9h64-2846-7x7f`](https://github.com/getaxonflow/axonflow/security/advisories/GHSA-9h64-2846-7x7f). Upgrade to the latest version for a more secure, reliable, and bug-free experience.
+
 ---
 
 ## Why you'd add this
