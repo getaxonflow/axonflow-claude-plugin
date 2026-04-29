@@ -599,6 +599,74 @@ else
 fi
 
 # ============================================================
+# Community-SaaS bootstrap: refusal on world-readable file
+# ============================================================
+#
+# CHANGELOG promises: bootstrap "refuses to load a registration file with
+# non-0600 permissions to prevent silent credential leak via a world-
+# readable file." Regression-guard that promise here so a future refactor
+# that drops the mode check trips this test.
+
+echo ""
+echo "--- Bootstrap: refuses to load 0644 registration file ---"
+BOOTSTRAP_TEST_HOME=$(mktemp -d)
+BOOTSTRAP_REGFILE="${BOOTSTRAP_TEST_HOME}/.config/axonflow/try-registration.json"
+mkdir -p "$(dirname "$BOOTSTRAP_REGFILE")"
+chmod 0700 "${BOOTSTRAP_TEST_HOME}/.config/axonflow"
+# Encode the unsafe credential we want to verify is NOT loaded.
+# base64(cs_unsafe:shouldnotload) is the value AXONFLOW_AUTH would take
+# if the bootstrap ignored the world-readable file mode.
+UNSAFE_AUTH=$(printf '%s' "cs_unsafe:shouldnotload" | base64 | tr -d '\n')
+cat > "$BOOTSTRAP_REGFILE" <<'EOF'
+{"tenant_id":"cs_unsafe","secret":"shouldnotload","expires_at":"2099-01-01T00:00:00Z"}
+EOF
+chmod 0644 "$BOOTSTRAP_REGFILE"
+
+# Stub `curl` so the bootstrap's registration-fallback POST fails fast
+# instead of hitting the real try.getaxonflow.com (which would issue a
+# fresh tenant and populate AXONFLOW_AUTH from the new credentials,
+# masking whether the 0644 refusal worked).
+BOOTSTRAP_STUB_DIR=$(mktemp -d)
+cat > "${BOOTSTRAP_STUB_DIR}/curl" <<'EOF'
+#!/usr/bin/env bash
+# Test stub: emit no body, return HTTP 599 so the bootstrap treats it
+# as a non-201 failure and leaves AXONFLOW_AUTH unset.
+for arg in "$@"; do
+  if [ "$arg" = "%{http_code}" ]; then
+    echo "599"
+    exit 0
+  fi
+done
+exit 1
+EOF
+chmod +x "${BOOTSTRAP_STUB_DIR}/curl"
+
+BOOTSTRAP_OUT=$(
+  HOME="$BOOTSTRAP_TEST_HOME" \
+  PATH="${BOOTSTRAP_STUB_DIR}:$PATH" \
+  AXONFLOW_MODE="community-saas" \
+  AXONFLOW_TELEMETRY=off \
+  bash -c '. "'"$PLUGIN_DIR"'/scripts/community-saas-bootstrap.sh"; echo "AUTH=${AXONFLOW_AUTH:-}"' 2>&1
+)
+
+# The unsafe credential MUST NOT have been loaded into AXONFLOW_AUTH.
+if echo "$BOOTSTRAP_OUT" | grep -q "AUTH=${UNSAFE_AUTH}"; then
+    echo "  FAIL: bootstrap loaded the 0644 registration file's credential"
+    ((FAIL++)) || true
+else
+    echo "  PASS: bootstrap did not load the world-readable credential"
+    ((PASS++)) || true
+fi
+if echo "$BOOTSTRAP_OUT" | grep -q 'unsafe permissions'; then
+    echo "  PASS: stderr warning emitted for unsafe permissions"
+    ((PASS++)) || true
+else
+    echo "  FAIL: no stderr warning emitted for unsafe permissions"
+    ((FAIL++)) || true
+fi
+rm -rf "$BOOTSTRAP_TEST_HOME" "$BOOTSTRAP_STUB_DIR"
+
+# ============================================================
 # Summary
 # ============================================================
 

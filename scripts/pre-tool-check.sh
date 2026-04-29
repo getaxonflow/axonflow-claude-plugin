@@ -18,9 +18,38 @@ if ! command -v curl &>/dev/null; then
   exit 0
 fi
 
-ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
+# Endpoint resolution per ADR-048: default to AxonFlow Community SaaS only when
+# the user has not set explicit config. Any user-supplied AXONFLOW_ENDPOINT or
+# AXONFLOW_AUTH is honoured untouched — no silent override.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
+  ENDPOINT="https://try.getaxonflow.com"
+  AXONFLOW_MODE="community-saas"
+  # Test-harness override (tests/heartbeat-real-stack/). Production code
+  # paths leave AXONFLOW_HARNESS unset and the endpoint stays pinned.
+  if [ "${AXONFLOW_HARNESS:-}" = "1" ] && [ -n "${AXONFLOW_HARNESS_AGENT_ENDPOINT:-}" ]; then
+    ENDPOINT="$AXONFLOW_HARNESS_AGENT_ENDPOINT"
+  fi
+else
+  ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
+  AXONFLOW_MODE="self-hosted"
+fi
 AUTH="${AXONFLOW_AUTH:-}"
 REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-8}"
+export AXONFLOW_MODE
+
+# Mode-clarity canary on stderr (NEVER stdout — stdout is the hook protocol).
+# CI's mode-clarity gate parses this line and asserts it matches the actual
+# outbound destination. Users can never be misled about which AxonFlow they're
+# talking to.
+echo "[AxonFlow] Connected to AxonFlow at ${ENDPOINT} (mode=${AXONFLOW_MODE})" >&2
+
+# Community-SaaS bootstrap: register with try.getaxonflow.com on first run and
+# load the resulting Basic-auth credential into AXONFLOW_AUTH. No-op when the
+# user has set explicit config (AXONFLOW_MODE != community-saas).
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/community-saas-bootstrap.sh"
+AUTH="${AXONFLOW_AUTH:-}"
 
 # Build auth header array safely (avoids word-splitting)
 AUTH_HEADER=()
@@ -28,8 +57,24 @@ if [ -n "$AUTH" ]; then
   AUTH_HEADER=(-H "Authorization: Basic $AUTH")
 fi
 
-# Telemetry: fire-and-forget on first invocation (stamp file guard inside script)
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# One-time positive disclosure when first connecting to Community SaaS. Stamp
+# is separate from telemetry so the disclosure fires exactly once per install,
+# independent of the 7-day heartbeat cadence.
+DISCLOSURE_STAMP="${HOME}/.cache/axonflow/claude-code-plugin-disclosure-shown"
+if [ "$AXONFLOW_MODE" = "community-saas" ] && [ ! -f "$DISCLOSURE_STAMP" ]; then
+  mkdir -p "$(dirname "$DISCLOSURE_STAMP")" 2>/dev/null && chmod 0700 "$(dirname "$DISCLOSURE_STAMP")" 2>/dev/null
+  cat <<'EOF' >&2
+[AxonFlow] Connected to AxonFlow Community SaaS at https://try.getaxonflow.com.
+Intended for basic testing and evaluation. For real workflows, real systems,
+or sensitive data, we recommend self-hosting AxonFlow from day one:
+  https://docs.getaxonflow.com/quickstart
+Anonymous telemetry: weekly heartbeat. Opt out: AXONFLOW_TELEMETRY=off
+EOF
+  : >"$DISCLOSURE_STAMP" 2>/dev/null
+fi
+
+# Telemetry heartbeat (7-day cadence; stamp-on-delivery; in-flight gate).
+# Backgrounded so it never blocks the hook protocol.
 "${SCRIPT_DIR}/telemetry-ping.sh" </dev/null &
 # Plugin/platform version compatibility check — fire-and-forget, runs once
 # per install, warns to stderr if the plugin is below the platform's
@@ -241,3 +286,4 @@ fi
 
 # Allowed — no output needed
 exit 0
+# CI re-trigger: 1777491394

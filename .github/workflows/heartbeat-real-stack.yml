@@ -1,0 +1,50 @@
+name: Heartbeat Real-Stack E2E
+
+# Runs the localhost-fake-stack harness across Linux + macOS to verify the
+# plugin's Community-SaaS bootstrap and 7-day telemetry heartbeat work
+# end-to-end against a real socket without ever touching production.
+# Cold-start asserts: registration POST → 0600 file written → heartbeat
+# delivered → 0600 stamp written. Warm-cache asserts: no fresh
+# registration, telemetry suppressed by the stamp gate.
+#
+# Bash hooks don't run natively on Windows (the plugin's hook scripts
+# require bash; Claude Code on Windows runs through WSL, which is the
+# Linux runner). No `windows-latest` here.
+
+on:
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "tests/heartbeat-real-stack/**"
+      - ".github/workflows/heartbeat-real-stack.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "tests/heartbeat-real-stack/**"
+      - ".github/workflows/heartbeat-real-stack.yml"
+
+jobs:
+  real-stack:
+    name: Real-stack E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      AXONFLOW_TELEMETRY: "off"
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install jq (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Install jq (macOS)
+        if: runner.os == 'macOS'
+        run: brew install jq
+      - name: Run real-stack harness
+        run: bash tests/heartbeat-real-stack/run_real_stack.sh
