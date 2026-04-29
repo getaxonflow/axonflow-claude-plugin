@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Plugin/platform version compatibility check.** A new `scripts/version-check.sh` runs once per install (stamp-file guard) on the first hook invocation. It queries the AxonFlow agent's `/health` endpoint and reads the new `plugin_compatibility.min_plugin_version["claude"]` field (advertised by platform v7.5.0+, axonflow-enterprise#1764). If the plugin's runtime version is below the floor the platform expects, the script logs a single upgrade hint to stderr; below recommended-but-above-min logs an info-level note; at or above recommended is silent. The check is fire-and-forget — failures (older platform without the field, network error, malformed response, missing dependencies) are swallowed and never block hook execution. Skippable via `AXONFLOW_PLUGIN_VERSION_CHECK=off`. Mirrors the SDK-side downgrade-warning gate that has run since v4.8.0.
+
 ### Removed
 
 - **BREAKING:** `DO_NOT_TRACK=1` is no longer honored as an AxonFlow telemetry opt-out in this plugin. Use `AXONFLOW_TELEMETRY=off` instead. The Claude Code CLI injects `DO_NOT_TRACK=1` into every hook subprocess regardless of user intent, so it cannot represent a real user choice in this context.

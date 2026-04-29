@@ -31,6 +31,11 @@ fi
 # Telemetry: fire-and-forget on first invocation (stamp file guard inside script)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 "${SCRIPT_DIR}/telemetry-ping.sh" </dev/null &
+# Plugin/platform version compatibility check — fire-and-forget, runs once
+# per install, warns to stderr if the plugin is below the platform's
+# min_plugin_version (axonflow-enterprise#1764). Same fire-and-forget shape
+# as telemetry-ping; never blocks the hook hot path.
+"${SCRIPT_DIR}/version-check.sh" </dev/null &
 
 # Read hook input from stdin
 INPUT=$(cat)
