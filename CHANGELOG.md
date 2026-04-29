@@ -1,18 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-04-29
 
 ### Changed
 
-- **Plugin defaults to AxonFlow Community SaaS on first run** when neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is set. Existing self-hosted installs (anyone who has set either env var) are honoured untouched — no silent endpoint override. Hooks emit a one-line canary on stderr every invocation: `[AxonFlow] Connected to AxonFlow at <URL> (mode=community-saas|self-hosted)`. A required CI gate parses this canary and asserts it matches the actual outbound destination so users can never be misled about which AxonFlow they're connected to.
-- **Anonymous telemetry switched to a 7-day heartbeat** with stamp-on-delivery semantics. Previously: a single stamp at install time, then silence forever. Now: at most one ping per machine per 7 days, gated by an in-flight `flock` so concurrent hook invocations don't stampede, and the stamp file mtime advances ONLY after the HTTP POST returns 2xx. A transient network failure no longer silences telemetry for 7 days.
+- **Plugin defaults to AxonFlow Community SaaS on first run** when neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is set. Existing self-hosted installs (anyone who has set either env var) are honoured untouched — no silent endpoint override. Hooks emit a one-line canary on stderr every invocation: `[AxonFlow] Connected to AxonFlow at <URL> (mode=community-saas|self-hosted)`. A CI gate parses this canary and asserts it matches the actual outbound destination so users can never be misled about which AxonFlow they're connected to.
+- **Anonymous telemetry switched to a 7-day heartbeat** with stamp-on-delivery semantics. Previously: a single stamp at install time, then silence forever. Now: at most one ping per machine per 7 days, gated by an in-flight lock so concurrent hook invocations don't stampede, and the stamp file mtime advances ONLY after the HTTP POST returns 2xx. A transient network failure no longer silences telemetry for 7 days.
 
 ### Added
 
 - **First-run Community-SaaS bootstrap** (`scripts/community-saas-bootstrap.sh`) registers against `try.getaxonflow.com/api/v1/register` and persists `{tenant_id, secret, expires_at, endpoint}` to `~/.config/axonflow/try-registration.json` (mode 0600 inside a 0700 directory). The Basic-auth credential is loaded into `AXONFLOW_AUTH` for the rest of the hook lifecycle. Refuses to load a registration file with non-0600 permissions to prevent silent credential leak via a world-readable file. Honours HTTP 429 with a 1-hour backoff stamp.
 - **One-time setup disclosure** on first Community-SaaS connection: a positive, journey-based message recommending self-host for real workflows. Stamped at `~/.cache/axonflow/claude-code-plugin-disclosure-shown` so it fires exactly once per install.
 - **Mode-clarity gate** (`tests/mode-clarity.sh`) covers all 5 input combinations of `AXONFLOW_ENDPOINT` × `AXONFLOW_AUTH`. Anti-spoof: parses the URL and compares scheme + host + port (a lookalike domain like `try.getaxonflow.com.attacker.com` cannot pass a substring check).
-- **Plugin/platform version compatibility check.** A new `scripts/version-check.sh` runs once per install (stamp-file guard) on the first hook invocation. It queries the AxonFlow agent's `/health` endpoint and reads the new `plugin_compatibility.min_plugin_version["claude-code"]` field. If the plugin's runtime version is below the floor the platform expects, the script logs a single upgrade hint to stderr; below recommended-but-above-min logs an info-level note; at or above recommended is silent. Fire-and-forget; failures never block hook execution. Skippable via `AXONFLOW_PLUGIN_VERSION_CHECK=off`. Mirrors the SDK-side downgrade-warning gate that has run since v4.8.0.
+- **Plugin/platform version compatibility check.** A new `scripts/version-check.sh` runs once per install (stamp-file guard) on the first hook invocation. It queries the AxonFlow agent's `/health` endpoint and reads `plugin_compatibility.min_plugin_version["claude-code"]`. If the plugin's runtime version is below the floor the platform expects, the script logs a single upgrade hint to stderr; below recommended-but-above-min logs an info-level note; at or above recommended is silent. Fire-and-forget; failures never block hook execution. Skippable via `AXONFLOW_PLUGIN_VERSION_CHECK=off`.
 
 ### Removed
 
