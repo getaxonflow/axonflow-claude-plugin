@@ -4,32 +4,30 @@
 
 **Upgrade strongly recommended.** Over the past month we've shipped substantial production, quality, and security hardening across all AxonFlow SDKs and plugins — upgrade to the latest version for a more secure, reliable, and bug-free experience.
 
-### Changed
+### BREAKING
 
-- **Plugin defaults to AxonFlow Community SaaS on first run** when neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is set. Existing self-hosted installs (anyone who has set either env var) are honoured untouched — no silent endpoint override. Hooks emit a one-line canary on stderr every invocation: `[AxonFlow] Connected to AxonFlow at <URL> (mode=community-saas|self-hosted)`. A CI gate parses this canary and asserts it matches the actual outbound destination so users can never be misled about which AxonFlow they're connected to.
-- **Anonymous telemetry switched to a 7-day heartbeat** with stamp-on-delivery semantics. Previously: a single stamp at install time, then silence forever. Now: at most one ping per machine per 7 days, gated by an in-flight lock so concurrent hook invocations don't stampede, and the stamp file mtime advances ONLY after the HTTP POST returns 2xx. A transient network failure no longer silences telemetry for 7 days.
+- **`DO_NOT_TRACK` is no longer honored as an AxonFlow telemetry opt-out.** Use `AXONFLOW_TELEMETRY=off` instead. Host tools and CLIs commonly inject `DO_NOT_TRACK=1` regardless of user intent, which makes it unreliable as a signal.
 
 ### Added
 
-- **First-run Community-SaaS bootstrap** (`scripts/community-saas-bootstrap.sh`) registers against `try.getaxonflow.com/api/v1/register` and persists `{tenant_id, secret, expires_at, endpoint}` to `~/.config/axonflow/try-registration.json` (mode 0600 inside a 0700 directory). The Basic-auth credential is loaded into `AXONFLOW_AUTH` for the rest of the hook lifecycle. Refuses to load a registration file with non-0600 permissions to prevent silent credential leak via a world-readable file. Honours HTTP 429 with a 1-hour backoff stamp.
-- **One-time setup disclosure** on first Community-SaaS connection: a positive, journey-based message recommending self-host for real workflows. Stamped at `~/.cache/axonflow/claude-code-plugin-disclosure-shown` so it fires exactly once per install.
-- **Mode-clarity gate** (`tests/mode-clarity.sh`) covers all 5 input combinations of `AXONFLOW_ENDPOINT` × `AXONFLOW_AUTH`. Anti-spoof: parses the URL and compares scheme + host + port (a lookalike domain like `try.getaxonflow.com.attacker.com` cannot pass a substring check).
-- **Plugin/platform version compatibility check.** A new `scripts/version-check.sh` runs once per install (stamp-file guard) on the first hook invocation. It queries the AxonFlow agent's `/health` endpoint and reads `plugin_compatibility.min_plugin_version["claude-code"]`. If the plugin's runtime version is below the floor the platform expects, the script logs a single upgrade hint to stderr; below recommended-but-above-min logs an info-level note; at or above recommended is silent. Fire-and-forget; failures never block hook execution. Skippable via `AXONFLOW_PLUGIN_VERSION_CHECK=off`.
+- **First-run Community-SaaS bootstrap** — plugin connects to AxonFlow Community SaaS at `https://try.getaxonflow.com` when neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is set. Registers via `/api/v1/register` on first run and persists `{tenant_id, secret, expires_at, endpoint}` to `~/.config/axonflow/try-registration.json` (mode 0600 inside a 0700 directory). Refuses to load a registration file with non-0600 permissions. HTTP 429 → 1-hour backoff. Existing self-hosted installs (`AXONFLOW_ENDPOINT` or `AXONFLOW_AUTH` set) are honoured untouched.
+- **Mode-clarity canary** on every hook init: `[AxonFlow] Connected to AxonFlow at <URL> (mode=community-saas|self-hosted)` on stderr. A CI gate parses this canary and asserts it matches the actual outbound destination.
+- **One-time setup disclosure** on first Community-SaaS connection. Stamped at `~/.cache/axonflow/claude-code-plugin-disclosure-shown` so it fires exactly once per install.
+- **Plugin/platform version compatibility check** (`scripts/version-check.sh`). Queries the agent's `/health` endpoint and warns if the plugin runtime is below the platform's expected floor. Skippable via `AXONFLOW_PLUGIN_VERSION_CHECK=off`.
 
-### Removed
+### Changed
 
-- **BREAKING:** `DO_NOT_TRACK=1` is no longer honored as an AxonFlow telemetry opt-out in this plugin. Use `AXONFLOW_TELEMETRY=off` instead. The Claude Code CLI injects `DO_NOT_TRACK=1` into every hook subprocess regardless of user intent, so it cannot represent a real user choice in this context.
+- **Telemetry switched to a 7-day delivered-heartbeat.** At most one anonymous ping per environment every 7 days, with the stamp advanced only after the POST returns 2xx — a transient network failure doesn't silence telemetry until the next window. Concurrent invocations are de-duplicated by an in-flight gate.
 
 ### Fixed
 
-- Telemetry ping now fires once per install on Claude Code. The previous behavior silently exited at the `DO_NOT_TRACK=1` check (injected by Claude Code), so the install ping never reached the stamp-file guard.
-- The deprecation warning no longer leaks to stderr on every hook invocation, eliminating UX noise that previously appeared alongside policy decisions.
-- Telemetry heartbeat now correctly classifies Community-SaaS sessions. The previous endpoint resolution fell into the localhost branch after the Community-SaaS bootstrap exported `AXONFLOW_AUTH` but intentionally left `AXONFLOW_ENDPOINT` unset; `/health` probes targeted localhost, `platform_version` shipped as `null`, and `deployment_mode` was tagged `production`. Resolution now keys off `AXONFLOW_MODE` first, so Community-SaaS users see the canonical endpoint and a dedicated `deployment_mode=community-saas` value.
-- Community-SaaS bootstrap and telemetry heartbeat now run on macOS. Both scripts gated their in-flight lock on `flock(1)`, which ships in stock Linux but not in stock macOS; a missing `flock` short-circuited the entire bootstrap, leaving Community-SaaS users unauthenticated, and silenced the telemetry heartbeat. Both paths now fall back to a `mkdir`-based atomic lock with stale-lock reclamation when `flock` is unavailable.
+- The `DO_NOT_TRACK=1 is deprecated...` warning is no longer emitted on every hook invocation when `DO_NOT_TRACK=1` is set.
+- Telemetry heartbeat now correctly classifies Community-SaaS sessions (was tagged `production` because the bootstrap-injected `AXONFLOW_AUTH` shadowed the resolver, sending `/health` probes to localhost and `platform_version=null` with the wrong `deployment_mode`).
+- Bootstrap and heartbeat now run on macOS — `flock(1)` isn't on stock macOS, so the in-flight lock falls back to a `mkdir`-based atomic lock with stale-lock reclamation when `flock` is unavailable.
 
 ### Security
 
-- `~/.config/axonflow/` and `~/.cache/axonflow/` now have their permissions restored to `0700` on every invocation (was: only set on creation via `mkdir -m 0700`). A user who already had `~/.config/` at the conventional `0755` would otherwise hold the `0600` registration credential file inside a traversable directory.
+- `~/.config/axonflow/` and `~/.cache/axonflow/` permissions tightened to `0700` on every invocation (was: only set on creation via `mkdir -m 0700`, which left existing 0755 dirs unchanged).
 
 ## [0.5.2] - 2026-04-22
 
