@@ -54,17 +54,20 @@ trap 'rm -rf "$WORK_DIR" "$SANDBOX_HOME"; [ -n "${SERVER_PID:-}" ] && kill "$SER
 python3 "$HARNESS_DIR/server.py" "$PORT" "$WORK_DIR" >"$WORK_DIR/_server.out" 2>&1 &
 SERVER_PID=$!
 
-# Wait for "server ready" with a 10s budget.
+# Wait for the readiness sentinel with a 30s budget. The file-based signal
+# is the authoritative one — Python's stdout can be block-buffered when
+# redirected to a file even with flush=True on some macOS GH runners.
 deadline=$(( $(date +%s) + 30 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
-  if grep -q '^server ready$' "$WORK_DIR/_server.out" 2>/dev/null; then
+  if [ -f "$WORK_DIR/_server_ready" ]; then
     break
   fi
   sleep 0.1
 done
-if ! grep -q '^server ready$' "$WORK_DIR/_server.out" 2>/dev/null; then
+if [ ! -f "$WORK_DIR/_server_ready" ]; then
   echo "FAIL: server did not start within 30s" >&2
-  cat "$WORK_DIR/_server.out" >&2
+  echo "--- server stdout/stderr ---" >&2
+  cat "$WORK_DIR/_server.out" >&2 || true
   exit 1
 fi
 
