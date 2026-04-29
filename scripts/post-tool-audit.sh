@@ -13,9 +13,27 @@ if ! command -v jq &>/dev/null || ! command -v curl &>/dev/null; then
   exit 0
 fi
 
-ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
-AUTH="${AXONFLOW_AUTH:-}"
+# Endpoint resolution per ADR-048: default to AxonFlow Community SaaS only when
+# the user has not set explicit config. Mirrors pre-tool-check.sh exactly so the
+# two hooks always agree on which AxonFlow they're talking to.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
+  ENDPOINT="https://try.getaxonflow.com"
+  AXONFLOW_MODE="community-saas"
+else
+  ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
+  AXONFLOW_MODE="self-hosted"
+fi
+export AXONFLOW_MODE
 REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-5}"
+
+# Bootstrap the Community-SaaS credential if needed. No-op in self-hosted mode.
+# Pre-tool-check ran first and likely already wrote the registration file; this
+# is just loading it. Mode-clarity log line is intentionally NOT repeated here —
+# pre-tool-check fires it once per hook invocation.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/community-saas-bootstrap.sh"
+AUTH="${AXONFLOW_AUTH:-}"
 
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then

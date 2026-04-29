@@ -143,7 +143,17 @@ claude --plugin-dir /path/to/axonflow-claude-plugin
 
 ## Start AxonFlow
 
-The plugin connects to AxonFlow, a self-hosted governance platform. AxonFlow must be running before the plugin loads. Everything stays on your infrastructure — **no LLM provider keys are required**. Claude Code handles every LLM call; AxonFlow only evaluates policies and records audit trails.
+The plugin needs a running AxonFlow agent to evaluate policies. You have two options:
+
+### Try in 30 seconds (AxonFlow Community SaaS)
+
+By default — when you have not set `AXONFLOW_ENDPOINT` or `AXONFLOW_AUTH` — the plugin connects to AxonFlow Community SaaS at `https://try.getaxonflow.com` and registers automatically on first run. No setup, no Docker, no infrastructure. Just install the plugin and use Claude Code.
+
+Community SaaS is intended for basic testing and evaluation. Best-effort retention up to 1 year; tenants idle for 3 months are terminated. We don't offer reliability or security guarantees on the shared endpoint.
+
+### Self-host for real workflows (recommended)
+
+For real workflows, real systems, or sensitive data, run AxonFlow on your own infrastructure. Everything stays local; no data crosses to AxonFlow.
 
 ```bash
 git clone https://github.com/getaxonflow/axonflow.git
@@ -153,21 +163,36 @@ cd axonflow && docker compose up -d
 curl -s http://localhost:8080/health | jq .
 ```
 
-See [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) for production deployment options.
+Then point the plugin at your local agent:
+
+```bash
+export AXONFLOW_ENDPOINT=http://localhost:8080
+```
+
+See [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) for production deployment options. For production-scale workloads, [request an evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval). For compliance-grade SLA + enterprise features, [contact us](https://getaxonflow.com/enterprise).
 
 ---
 
 ## Configure
 
-```bash
-# Community mode (local development) — any values work
-export AXONFLOW_AUTH=$(echo -n "demo:demo-secret" | base64)
+The plugin emits a one-line canary on every hook invocation so you always know which AxonFlow you're connected to:
 
-# Enterprise mode — your AxonFlow client credentials
+```
+[AxonFlow] Connected to AxonFlow at https://try.getaxonflow.com (mode=community-saas)
+```
+
+To change connection target:
+
+```bash
+# Self-hosted local agent
+export AXONFLOW_ENDPOINT=http://localhost:8080
+
+# Self-hosted remote agent with credentials
+export AXONFLOW_ENDPOINT=https://axonflow.your-company.com
 export AXONFLOW_AUTH=$(echo -n "your-client-id:your-client-secret" | base64)
 
-# Custom endpoint (default: http://localhost:8080)
-export AXONFLOW_ENDPOINT=http://your-axonflow-host:8080
+# Default (Community SaaS) — leave both unset
+unset AXONFLOW_ENDPOINT AXONFLOW_AUTH
 
 # Optional: increase hook timeout for remote / VPN'd deployments
 # (PreToolUse default 8s, PostToolUse default 5s)
