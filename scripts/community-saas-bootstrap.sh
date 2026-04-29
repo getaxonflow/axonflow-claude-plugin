@@ -86,8 +86,18 @@ load_registration_into_env() {
   if [ ! -f "$file" ]; then
     return 1
   fi
+  # Same portability gotcha as stamp_mtime: GNU `stat -f` doesn't fail
+  # cleanly on Linux (it interprets -f as --file-system), so we can't blindly
+  # chain BSD with `||`. Probe GNU first (CI is Linux), require numeric/octal
+  # output, then fall back to BSD with the same validation.
   local mode
-  mode=$(stat -f %Lp "$file" 2>/dev/null || stat -c %a "$file" 2>/dev/null || echo "")
+  mode=$(stat -c %a "$file" 2>/dev/null) || mode=""
+  case "$mode" in
+    ''|*[!0-9]*) mode=$(stat -f %Lp "$file" 2>/dev/null) || mode="" ;;
+  esac
+  case "$mode" in
+    ''|*[!0-9]*) mode="" ;;
+  esac
   if [ "$mode" != "600" ] && [ "$mode" != "0600" ]; then
     echo "[AxonFlow] $file has unsafe permissions ($mode); refusing to use. Re-register: rm '$file' && retry" >&2
     return 1
@@ -113,11 +123,18 @@ registration_is_fresh() {
   local expires_at
   expires_at=$(jq -r '.expires_at // empty' "$file" 2>/dev/null)
   [ -z "$expires_at" ] && return 1
-  # expires_at is RFC3339; convert to epoch via gdate (BSD) or date (GNU).
+  # GNU date and BSD date have different flag sets; try GNU first (CI is
+  # Linux) and validate numeric, then fall back to BSD with the same
+  # validation. The bare `||` chain is broken because BSD `date -j -f`
+  # exits 0 with a usage message on Linux GNU date.
   local expires_epoch
-  expires_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${expires_at%%.*}Z" "+%s" 2>/dev/null \
-    || date -d "$expires_at" "+%s" 2>/dev/null \
-    || echo 0)
+  expires_epoch=$(date -d "$expires_at" "+%s" 2>/dev/null) || expires_epoch=""
+  case "$expires_epoch" in
+    ''|*[!0-9]*) expires_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "${expires_at%%.*}Z" "+%s" 2>/dev/null) || expires_epoch="" ;;
+  esac
+  case "$expires_epoch" in
+    ''|*[!0-9]*) expires_epoch=0 ;;
+  esac
   [ "$expires_epoch" -le 0 ] && return 1
   local thirty_days=$((30 * 24 * 60 * 60))
   [ $((expires_epoch - NOW)) -lt "$thirty_days" ] && return 1

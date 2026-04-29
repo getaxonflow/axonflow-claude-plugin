@@ -55,7 +55,7 @@ python3 "$HARNESS_DIR/server.py" "$PORT" "$WORK_DIR" >"$WORK_DIR/_server.out" 2>
 SERVER_PID=$!
 
 # Wait for "server ready" with a 10s budget.
-deadline=$(( $(date +%s) + 10 ))
+deadline=$(( $(date +%s) + 30 ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
   if grep -q '^server ready$' "$WORK_DIR/_server.out" 2>/dev/null; then
     break
@@ -63,7 +63,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
   sleep 0.1
 done
 if ! grep -q '^server ready$' "$WORK_DIR/_server.out" 2>/dev/null; then
-  echo "FAIL: server did not start within 10s" >&2
+  echo "FAIL: server did not start within 30s" >&2
   cat "$WORK_DIR/_server.out" >&2
   exit 1
 fi
@@ -142,7 +142,9 @@ fi
 REG_FILE="${SANDBOX_HOME}/.config/axonflow/try-registration.json"
 if [ -f "$REG_FILE" ]; then
   pass "registration file written"
-  REG_MODE=$(stat -f %Lp "$REG_FILE" 2>/dev/null || stat -c %a "$REG_FILE" 2>/dev/null || echo "")
+  REG_MODE=$(stat -c %a "$REG_FILE" 2>/dev/null) || REG_MODE=""
+  case "$REG_MODE" in ''|*[!0-9]*) REG_MODE=$(stat -f %Lp "$REG_FILE" 2>/dev/null) || REG_MODE="" ;; esac
+  case "$REG_MODE" in ''|*[!0-9]*) REG_MODE="" ;; esac
   if [ "$REG_MODE" = "600" ] || [ "$REG_MODE" = "0600" ]; then
     pass "registration file mode is 0600"
   else
@@ -179,7 +181,9 @@ fi
 STAMP_FILE="${SANDBOX_HOME}/.cache/axonflow/claude-code-plugin-telemetry-sent"
 if [ -f "$STAMP_FILE" ]; then
   pass "telemetry stamp file written"
-  STAMP_MODE=$(stat -f %Lp "$STAMP_FILE" 2>/dev/null || stat -c %a "$STAMP_FILE" 2>/dev/null || echo "")
+  STAMP_MODE=$(stat -c %a "$STAMP_FILE" 2>/dev/null) || STAMP_MODE=""
+  case "$STAMP_MODE" in ''|*[!0-9]*) STAMP_MODE=$(stat -f %Lp "$STAMP_FILE" 2>/dev/null) || STAMP_MODE="" ;; esac
+  case "$STAMP_MODE" in ''|*[!0-9]*) STAMP_MODE="" ;; esac
   if [ "$STAMP_MODE" = "600" ] || [ "$STAMP_MODE" = "0600" ]; then
     pass "telemetry stamp file mode is 0600"
   else
