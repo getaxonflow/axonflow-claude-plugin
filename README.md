@@ -199,7 +199,7 @@ unset AXONFLOW_ENDPOINT AXONFLOW_AUTH
 export AXONFLOW_TIMEOUT_SECONDS=12
 ```
 
-In community mode (`DEPLOYMENT_MODE=community`), leave `AXONFLOW_AUTH` unset and the plugin will still work.
+When `AXONFLOW_AUTH` is unset and `AXONFLOW_ENDPOINT` is unset, the plugin defaults to AxonFlow Community SaaS — no further configuration needed.
 
 ---
 
@@ -321,7 +321,7 @@ For the broader validation story — explain-decision, override lifecycle, audit
 
 ## Telemetry
 
-Anonymous one-time ping on first hook invocation: plugin version, OS, architecture, bash version, AxonFlow platform version. **Never** tool arguments, message contents, or policy data.
+Anonymous heartbeat at most once every 7 days per machine: plugin version, OS, architecture, bash version, AxonFlow platform version, deployment mode (community-saas / self-hosted production / self-hosted development). **Never** tool arguments, message contents, or policy data. The stamp file mtime advances only after the HTTP POST returns 2xx, so a transient network failure does not silence telemetry until the next window.
 
 Opt out: set `AXONFLOW_TELEMETRY=off` in the environment Claude Code runs in.
 

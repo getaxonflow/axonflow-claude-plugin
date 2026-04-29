@@ -39,11 +39,14 @@ fi
 STAMP_DIR="${HOME}/.cache/axonflow"
 STAMP_FILE="${STAMP_DIR}/claude-code-plugin-telemetry-sent"
 LOCK_FILE="${STAMP_DIR}/claude-code-plugin-telemetry.lock"
+LOCK_DIR="${STAMP_DIR}/claude-code-plugin-telemetry.lock.d"
 HEARTBEAT_INTERVAL_SECS=$((7 * 24 * 60 * 60))
 
-# Best-effort mkdir; if it fails (no HOME, read-only fs) we treat as
-# "no stamp" and a single ping fires per process. No crash.
-mkdir -p -m 0700 "$STAMP_DIR" 2>/dev/null
+# Best-effort mkdir + chmod; if it fails (no HOME, read-only fs) we treat
+# as "no stamp" and a single ping fires per process. No crash. The chmod
+# matters because mkdir -m only sets mode on directories it creates,
+# leaving an existing 0755 .cache/axonflow with a 0755 mode.
+mkdir -p "$STAMP_DIR" 2>/dev/null && chmod 0700 "$STAMP_DIR" 2>/dev/null
 
 # Step 2: pre-lock mtime check. Cheap exit when stamp is fresh.
 NOW=$(date +%s)
@@ -87,11 +90,33 @@ if is_fresh "$(stamp_mtime)"; then
   exit 0
 fi
 
-# Step 3: in-flight gate via non-blocking flock. First concurrent invocation
-# wins; the rest fast-path. Lock auto-releases when fd 9 closes on exit.
-exec 9>"$LOCK_FILE" 2>/dev/null || exit 0
-if ! flock -n 9 2>/dev/null; then
-  exit 0
+# Step 3: in-flight gate. flock(1) is Linux-only (not in stock macOS); fall
+# back to a mkdir-based atomic lock. mkdir is POSIX-atomic, so two concurrent
+# heartbeats can't both succeed at creating the lockdir. First wins, rest
+# fast-path past. We also reclaim lockdirs older than 5 minutes (registration
+# crashed mid-flight) so a single stale lockdir can't silence telemetry.
+TELEMETRY_LOCK_HELD=0
+if command -v flock &>/dev/null; then
+  exec 9>"$LOCK_FILE" 2>/dev/null || exit 0
+  if ! flock -n 9 2>/dev/null; then
+    exit 0
+  fi
+  TELEMETRY_LOCK_HELD=1
+else
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    LOCK_MTIME=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)
+    case "$LOCK_MTIME" in
+      ''|*[!0-9]*) LOCK_MTIME=0 ;;
+    esac
+    if [ "$LOCK_MTIME" -gt 0 ] && [ $((NOW - LOCK_MTIME)) -gt 300 ]; then
+      rm -rf "$LOCK_DIR" 2>/dev/null
+      mkdir "$LOCK_DIR" 2>/dev/null || exit 0
+    else
+      exit 0
+    fi
+  fi
+  TELEMETRY_LOCK_HELD=2
+  trap '[ "$TELEMETRY_LOCK_HELD" = "2" ] && rm -rf "$LOCK_DIR" 2>/dev/null' EXIT
 fi
 
 # Step 4: re-check mtime after acquiring the lock. Between the pre-lock check

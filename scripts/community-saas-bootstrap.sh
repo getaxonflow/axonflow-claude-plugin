@@ -40,21 +40,28 @@ fi
 # Dependencies — exit silently if missing.
 command -v curl &>/dev/null || { return 0 2>/dev/null || exit 0; }
 command -v jq &>/dev/null || { return 0 2>/dev/null || exit 0; }
-command -v flock &>/dev/null || { return 0 2>/dev/null || exit 0; }
+# flock is Linux-only (not in stock macOS). Fall back to a mkdir-based
+# atomic lock when it's missing; a single concurrent registration is fine.
+HAS_FLOCK=1
+command -v flock &>/dev/null || HAS_FLOCK=0
 
 CONFIG_DIR="${HOME}/.config/axonflow"
 REGISTRATION_FILE="${CONFIG_DIR}/try-registration.json"
 LOCK_FILE="${CONFIG_DIR}/try-registration.lock"
+LOCK_DIR="${CONFIG_DIR}/try-registration.lock.d"
 BACKOFF_FILE="${HOME}/.cache/axonflow/claude-code-plugin-register-backoff"
 ENDPOINT="https://try.getaxonflow.com"
 REGISTER_URL="${ENDPOINT}/api/v1/register"
 
-# Tighten the config dir at every invocation. If the user ever loosened
-# permissions accidentally, this restores them. If we can't create the dir
-# (no HOME, read-only fs) we fall through to "no registration available"
-# and the caller treats us as "could not bootstrap".
-mkdir -p -m 0700 "$CONFIG_DIR" 2>/dev/null
-mkdir -p -m 0700 "$(dirname "$BACKOFF_FILE")" 2>/dev/null
+# Tighten the config dir at every invocation. mkdir -p -m 0700 only sets
+# mode on directories it creates, NOT on existing ones. Re-chmod is a
+# small but important defence: a user with .config at 0755 (the conv-
+# entional default) would otherwise hold our 0600 credential file inside
+# a traversable directory. The credential mode protects against other
+# UIDs reading the file directly, but the directory mode is the second
+# layer of defence advertised by the CHANGELOG.
+mkdir -p "$CONFIG_DIR" 2>/dev/null && chmod 0700 "$CONFIG_DIR" 2>/dev/null
+mkdir -p "$(dirname "$BACKOFF_FILE")" 2>/dev/null && chmod 0700 "$(dirname "$BACKOFF_FILE")" 2>/dev/null
 
 NOW=$(date +%s)
 
@@ -106,7 +113,7 @@ registration_is_fresh() {
 
 # Fast path: existing registration is still good. Load and return.
 if registration_is_fresh "$REGISTRATION_FILE"; then
-  load_registration_into_env "$REGISTRATION_FILE" >/dev/null 2>&1 && return 0 2>/dev/null
+  load_registration_into_env "$REGISTRATION_FILE" >/dev/null && return 0 2>/dev/null
 fi
 
 # Backoff path: if a recent 429 told us to back off, honour it without trying.
@@ -118,14 +125,47 @@ if [ -f "$BACKOFF_FILE" ]; then
 fi
 
 # In-flight gate: another hook may already be registering. If so, skip.
-exec 8>"$LOCK_FILE" 2>/dev/null || { return 0 2>/dev/null || exit 0; }
-if ! flock -n 8 2>/dev/null; then
-  return 0 2>/dev/null || exit 0
+# Linux uses flock(1); macOS doesn't ship flock so we fall back to a
+# mkdir-based atomic lock (POSIX-portable: mkdir is atomic w.r.t. itself).
+LOCK_HELD=0
+if [ "$HAS_FLOCK" = "1" ]; then
+  exec 8>"$LOCK_FILE" 2>/dev/null || { return 0 2>/dev/null || exit 0; }
+  if ! flock -n 8 2>/dev/null; then
+    return 0 2>/dev/null || exit 0
+  fi
+  LOCK_HELD=1
+else
+  if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    # Another bootstrap is in flight, OR a stale lockdir from a crashed
+    # previous run. Treat lockdirs older than 5 minutes as stale and
+    # reclaim them — registration takes ~1s so this is generous.
+    LOCK_MTIME=$(stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || echo 0)
+    case "$LOCK_MTIME" in
+      ''|*[!0-9]*) LOCK_MTIME=0 ;;
+    esac
+    if [ "$LOCK_MTIME" -gt 0 ] && [ $((NOW - LOCK_MTIME)) -gt 300 ]; then
+      rm -rf "$LOCK_DIR" 2>/dev/null
+      mkdir "$LOCK_DIR" 2>/dev/null || { return 0 2>/dev/null || exit 0; }
+    else
+      return 0 2>/dev/null || exit 0
+    fi
+  fi
+  LOCK_HELD=2
 fi
+# Single EXIT trap covers BOTH the optional mkdir lockdir AND the
+# tempfiles below. Defining it once here avoids the second `trap` below
+# from clobbering the lockdir-cleanup we'd otherwise install separately.
+cleanup_on_exit() {
+  [ -n "${HTTP_CODE_FILE:-}" ] && rm -f "$HTTP_CODE_FILE" 2>/dev/null
+  [ -n "${RESPONSE_BODY_FILE:-}" ] && rm -f "$RESPONSE_BODY_FILE" 2>/dev/null
+  [ "$LOCK_HELD" = "2" ] && rm -rf "$LOCK_DIR" 2>/dev/null
+  return 0
+}
+trap cleanup_on_exit EXIT
 
 # Re-check freshness inside the lock — a peer process may have just registered.
 if registration_is_fresh "$REGISTRATION_FILE"; then
-  load_registration_into_env "$REGISTRATION_FILE" >/dev/null 2>&1 && return 0 2>/dev/null
+  load_registration_into_env "$REGISTRATION_FILE" >/dev/null && return 0 2>/dev/null
 fi
 
 # Build the label once. Keep it under 255 chars (server-side limit).
@@ -135,9 +175,9 @@ LABEL="claude-code-plugin@${PLUGIN_VERSION} / $(uname -s)-$(uname -m)"
 
 # Issue the registration. --fail returns non-zero on HTTP 4xx/5xx so we
 # can distinguish 201/200 from 429 and other failures via curl exit code.
+# Tempfile cleanup is handled by the cleanup_on_exit trap installed earlier.
 HTTP_CODE_FILE="$(mktemp 2>/dev/null)" || { return 0 2>/dev/null || exit 0; }
-RESPONSE_BODY_FILE="$(mktemp 2>/dev/null)" || { rm -f "$HTTP_CODE_FILE"; return 0 2>/dev/null || exit 0; }
-trap 'rm -f "$HTTP_CODE_FILE" "$RESPONSE_BODY_FILE"' EXIT
+RESPONSE_BODY_FILE="$(mktemp 2>/dev/null)" || { return 0 2>/dev/null || exit 0; }
 
 curl -sS --max-time 10 -o "$RESPONSE_BODY_FILE" -w "%{http_code}" \
   -X POST "$REGISTER_URL" \

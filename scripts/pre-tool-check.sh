@@ -57,7 +57,7 @@ fi
 # independent of the 7-day heartbeat cadence.
 DISCLOSURE_STAMP="${HOME}/.cache/axonflow/claude-code-plugin-disclosure-shown"
 if [ "$AXONFLOW_MODE" = "community-saas" ] && [ ! -f "$DISCLOSURE_STAMP" ]; then
-  mkdir -p -m 0700 "$(dirname "$DISCLOSURE_STAMP")" 2>/dev/null
+  mkdir -p "$(dirname "$DISCLOSURE_STAMP")" 2>/dev/null && chmod 0700 "$(dirname "$DISCLOSURE_STAMP")" 2>/dev/null
   cat <<'EOF' >&2
 [AxonFlow] Connected to AxonFlow Community SaaS at https://try.getaxonflow.com.
 Intended for basic testing and evaluation. For real workflows, real systems,

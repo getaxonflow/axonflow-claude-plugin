@@ -22,11 +22,11 @@
 - Telemetry ping now fires once per install on Claude Code. The previous behavior silently exited at the `DO_NOT_TRACK=1` check (injected by Claude Code), so the install ping never reached the stamp-file guard.
 - The deprecation warning no longer leaks to stderr on every hook invocation, eliminating UX noise that previously appeared alongside policy decisions.
 - Telemetry heartbeat now correctly classifies Community-SaaS sessions. The previous endpoint resolution fell into the localhost branch after the Community-SaaS bootstrap exported `AXONFLOW_AUTH` but intentionally left `AXONFLOW_ENDPOINT` unset; `/health` probes targeted localhost, `platform_version` shipped as `null`, and `deployment_mode` was tagged `production`. Resolution now keys off `AXONFLOW_MODE` first, so Community-SaaS users see the canonical endpoint and a dedicated `deployment_mode=community-saas` value.
+- Community-SaaS bootstrap and telemetry heartbeat now run on macOS. Both scripts gated their in-flight lock on `flock(1)`, which ships in stock Linux but not in stock macOS; a missing `flock` short-circuited the entire bootstrap, leaving Community-SaaS users unauthenticated, and silenced the telemetry heartbeat. Both paths now fall back to a `mkdir`-based atomic lock with stale-lock reclamation when `flock` is unavailable.
 
-### CI / development
+### Security
 
-- Test harness (`tests/test-hooks.sh`) and CI workflows (`test.yml`, `install-smoke.yml`, `smoke-e2e.yml`) now use `AXONFLOW_TELEMETRY=off` to suppress telemetry during automated runs.
-
+- `~/.config/axonflow/` and `~/.cache/axonflow/` now have their permissions restored to `0700` on every invocation (was: only set on creation via `mkdir -m 0700`). A user who already had `~/.config/` at the conventional `0755` would otherwise hold the `0600` registration credential file inside a traversable directory.
 
 ## [0.5.2] - 2026-04-22
 
