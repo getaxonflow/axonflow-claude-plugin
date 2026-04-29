@@ -2,6 +2,8 @@
 
 ## [0.6.0] - 2026-04-29
 
+**Upgrade strongly recommended.** Over the past month we've shipped substantial production, quality, and security hardening across all AxonFlow SDKs and plugins — upgrade to the latest version for a more secure, reliable, and bug-free experience.
+
 ### Changed
 
 - **Plugin defaults to AxonFlow Community SaaS on first run** when neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is set. Existing self-hosted installs (anyone who has set either env var) are honoured untouched — no silent endpoint override. Hooks emit a one-line canary on stderr every invocation: `[AxonFlow] Connected to AxonFlow at <URL> (mode=community-saas|self-hosted)`. A CI gate parses this canary and asserts it matches the actual outbound destination so users can never be misled about which AxonFlow they're connected to.
