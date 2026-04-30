@@ -143,19 +143,29 @@ claude --plugin-dir /path/to/axonflow-claude-plugin
 
 ---
 
-## Start AxonFlow
+## Where your data goes
 
-The plugin needs a running AxonFlow agent to evaluate policies. You have two options:
+The plugin governs tool calls and outbound messages by sending each one to an AxonFlow endpoint for policy evaluation and audit. The endpoint is selected by which of `AXONFLOW_ENDPOINT` / `AXONFLOW_AUTH` you have set when the hooks fire.
 
-### Try in 30 seconds (AxonFlow Community SaaS)
+### Default: AxonFlow Community SaaS
 
-By default — when you have not set `AXONFLOW_ENDPOINT` or `AXONFLOW_AUTH` — the plugin connects to AxonFlow Community SaaS at `https://try.getaxonflow.com` and registers automatically on first run. No setup, no Docker, no infrastructure. Just install the plugin and use Claude Code.
+If you do not set `AXONFLOW_ENDPOINT` or `AXONFLOW_AUTH`, the plugin connects to **AxonFlow Community SaaS** at `https://try.getaxonflow.com` and registers a tenant on first run. No setup, no Docker, no infrastructure — install the plugin and use Claude Code. Every hook invocation logs a one-line canary on stderr so you always know which mode is active:
 
-Community SaaS is intended for basic testing and evaluation. Best-effort retention up to 1 year; tenants idle for 3 months are terminated. We don't offer reliability or security guarantees on the shared endpoint.
+```
+[AxonFlow] Connected to AxonFlow at https://try.getaxonflow.com (mode=community-saas)
+```
 
-### Self-host for real workflows (recommended)
+| What goes to `try.getaxonflow.com` | What does NOT |
+|---|---|
+| Tool name + arguments before each governed call | LLM provider API keys |
+| Outbound message bodies before delivery (PII/secret scan) | Claude Code conversation history outside governed tools |
+| Anonymous 7-day heartbeat (plugin version, OS, runtime) | Files outside the Claude Code runtime |
 
-For real workflows, real systems, or sensitive data, run AxonFlow on your own infrastructure. Everything stays local; no data crosses to AxonFlow.
+Community SaaS is intended for evaluation and prototyping. Best-effort retention up to 1 year; tenants idle for 3 months are terminated. We don't offer reliability or security guarantees on the shared endpoint. Read the [Try AxonFlow — Free Trial Server](https://docs.getaxonflow.com/docs/deployment/community-saas/) page for the full disclosure, including data retention and registration mechanics.
+
+### Self-hosted: your own AxonFlow
+
+For real workflows, real systems, or sensitive data, run AxonFlow on your own infrastructure. Everything stays local; nothing leaves your network except the anonymous 7-day heartbeat.
 
 ```bash
 git clone https://github.com/getaxonflow/axonflow.git
@@ -163,15 +173,24 @@ cd axonflow && docker compose up -d
 
 # verify
 curl -s http://localhost:8080/health | jq .
-```
 
-Then point the plugin at your local agent:
-
-```bash
+# point the plugin at your local agent
 export AXONFLOW_ENDPOINT=http://localhost:8080
 ```
 
-See [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) for production deployment options. For production-scale workloads, [request an evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval). For compliance-grade SLA + enterprise features, [contact us](https://getaxonflow.com/enterprise).
+See the [Self-Hosted Deployment Guide](https://docs.getaxonflow.com/docs/deployment/self-hosted/) for prerequisites and production options. For production-scale workloads, [request an evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval). For compliance-grade SLA + enterprise features, [contact us](https://getaxonflow.com/enterprise).
+
+### Air-gapped: zero outbound
+
+For environments where no outbound traffic is permitted at all, set both:
+
+```bash
+export AXONFLOW_COMMUNITY_SAAS=0   # disable Community SaaS auto-bootstrap
+export AXONFLOW_TELEMETRY=off      # disable the anonymous 7-day heartbeat
+export AXONFLOW_ENDPOINT=http://your-internal-axonflow:8080
+```
+
+With both env vars set and `AXONFLOW_ENDPOINT` pointing at a same-network instance, no traffic leaves your environment.
 
 ---
 
