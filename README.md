@@ -123,16 +123,52 @@ Org-wide policies and session overrides are **Enterprise-only** — those are th
 
 ---
 
+## Privacy notice
+
+**Read before installing.** AxonFlow [Community SaaS](https://docs.getaxonflow.com/docs/deployment/community-saas/) at `try.getaxonflow.com` is the zero-config endpoint the plugin uses if neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is configured. In that mode, governed tool inputs (tool name + arguments) and outbound message bodies are sent off-host to AxonFlow's shared evaluation endpoint for policy evaluation and audit. **Community SaaS is for early exploration only** — not for production workloads, regulated environments, real user data, personal data, or any other sensitive information. It is offered "as is" on a best-effort basis with no SLA, no warranties, and no commitment to retention, deletion, or incident-response timelines.
+
+For any serious use, choose one of the following instead:
+
+1. **[Self-host AxonFlow Community Edition](https://docs.getaxonflow.com/docs/deployment/self-hosted/)** — runs entirely on your infrastructure and keeps data within your boundary. Recommended for any real workload. The in-README quick start is in [Step 1](#step-1-install-the-axonflow-platform) below.
+2. **Community Edition with an [Evaluation License](https://docs.getaxonflow.com/docs/deployment/evaluation-rollout-guide/)** — for production use with real users or clients on the open core; adds production-fit limits and license-gated features. Free 90-day [evaluation license](https://getaxonflow.com/plugins/evaluation-license).
+3. **[AxonFlow Enterprise](https://docs.getaxonflow.com/docs/deployment/community-to-enterprise-migration/)** — production-grade governance, regulatory-grade controls, SLOs, and contractual commitments suitable for regulated industries. Contact [hello@getaxonflow.com](mailto:hello@getaxonflow.com).
+
+To skip Community SaaS entirely: set `AXONFLOW_ENDPOINT` to a self-hosted AxonFlow URL. That alone flips the plugin into self-hosted mode — the Community SaaS auto-bootstrap is not attempted, and no env var is required. Get the AxonFlow platform from [getaxonflow/axonflow](https://github.com/getaxonflow/axonflow) and follow the [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) guide for the Docker Compose setup. For air-gapped environments where AxonFlow is not yet reachable but you want to suppress the bootstrap attempt, set `AXONFLOW_COMMUNITY_SAAS=0`; set `AXONFLOW_TELEMETRY=off` to also disable the anonymous 7-day heartbeat.
+
+LLM provider keys never leave the user's machine in any mode — Claude Code makes the LLM calls; AxonFlow only enforces policies and records audit trails.
+
+---
+
 ## Install
 
-### Add this repo as a custom marketplace (recommended)
+This is a **three-step** install: stand up the AxonFlow platform, add the plugin to Claude Code, then point the plugin at the platform. The plugin alone does not enforce policy — its hook scripts are thin clients that talk to an AxonFlow agent gateway. If the platform is not installed and reachable, governed tool calls have nothing to evaluate against. **Skipping Step 3 is the most common mistake**: the platform is running locally but the plugin still falls back to Community SaaS because no `AXONFLOW_ENDPOINT` is configured.
+
+### Step 1: install the AxonFlow platform
+
+For any real workload, run AxonFlow on your own infrastructure via Docker Compose:
+
+```bash
+git clone https://github.com/getaxonflow/axonflow.git
+cd axonflow && docker compose up -d
+
+# verify
+curl -s http://localhost:8080/health | jq .
+```
+
+Follow the [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) guide for prerequisites (Docker Engine or Desktop, Docker Compose v2, 4 GB RAM, 10 GB disk) and the [Self-Hosted Deployment Guide](https://docs.getaxonflow.com/docs/deployment/self-hosted/) for production options. For production with real users or clients, run Community Edition with a free 90-day [Evaluation License](https://docs.getaxonflow.com/docs/deployment/evaluation-rollout-guide/) or [AxonFlow Enterprise](https://docs.getaxonflow.com/docs/deployment/community-to-enterprise-migration/).
+
+> Skipping Step 1 makes the plugin fall back to the [Community SaaS](https://docs.getaxonflow.com/docs/deployment/community-saas/) endpoint at `try.getaxonflow.com` for early exploration only. **Do not skip Step 1 for any real workload** — see the [Privacy notice](#privacy-notice) above.
+
+### Step 2: install the plugin
+
+Add this repo as a custom marketplace (recommended):
 
 ```
 /plugin marketplace add getaxonflow/axonflow-claude-plugin
 /plugin install axonflow
 ```
 
-### Or load locally for testing
+Or load locally for testing:
 
 ```bash
 git clone https://github.com/getaxonflow/axonflow-claude-plugin.git
@@ -141,19 +177,38 @@ claude --plugin-dir /path/to/axonflow-claude-plugin
 
 > The plugin has been submitted to the official Anthropic marketplace (`anthropics/claude-plugins-official`) and is currently in Anthropic's review queue. Until it appears in `/plugin > Discover`, use one of the install methods above.
 
+### Step 3: point the plugin at the platform
+
+Without this step the plugin auto-registers with Community SaaS regardless of whether you ran Step 1 — it does not auto-detect a locally-running AxonFlow. Set `AXONFLOW_ENDPOINT` (and `AXONFLOW_AUTH` if you have credentials):
+
+```bash
+# Self-hosted local agent — that alone flips mode to self-hosted, no other env var needed
+export AXONFLOW_ENDPOINT=http://localhost:8080
+
+# Self-hosted remote agent with credentials
+export AXONFLOW_ENDPOINT=https://axonflow.your-company.com
+export AXONFLOW_AUTH=$(echo -n "your-client-id:your-client-secret" | base64)
+```
+
+Every hook invocation logs a one-line canary on stderr confirming the active mode:
+
+```
+[AxonFlow] Connected to AxonFlow at http://localhost:8080 (mode=self-hosted)
+```
+
+If the canary says `mode=community-saas` after you ran Step 1, the plugin is still hitting `try.getaxonflow.com` because Step 3 was skipped or `AXONFLOW_ENDPOINT` is unset. Fix Step 3 and reload.
+
 ---
 
-## Where your data goes
+## Mode-specific reference
 
-The plugin governs tool calls and outbound messages by sending each one to an AxonFlow endpoint for policy evaluation and audit. The endpoint is selected by which of `AXONFLOW_ENDPOINT` / `AXONFLOW_AUTH` you have set when the hooks fire.
+The recommended self-hosted path is covered in [Install Step 1](#step-1-install-the-axonflow-platform). Two more modes worth knowing about:
 
-### Default: AxonFlow Community SaaS
+### Community SaaS — for early exploration only
 
-If you do not set `AXONFLOW_ENDPOINT` or `AXONFLOW_AUTH`, the plugin connects to **AxonFlow Community SaaS** at `https://try.getaxonflow.com` and registers a tenant on first run. No setup, no Docker, no infrastructure — install the plugin and use Claude Code. Every hook invocation logs a one-line canary on stderr so you always know which mode is active:
+The plugin's zero-config fallback when neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is configured. The plugin registers a tenant with `try.getaxonflow.com` on first run and persists credentials at `~/.config/axonflow/try-registration.json` (mode `0600`).
 
-```
-[AxonFlow] Connected to AxonFlow at https://try.getaxonflow.com (mode=community-saas)
-```
+**Use only for early exploration of the plugin's behaviour. Not for production workloads, regulated environments, real user data, personal data, or any other sensitive information.**
 
 | What goes to `try.getaxonflow.com` | What does NOT |
 |---|---|
@@ -161,28 +216,11 @@ If you do not set `AXONFLOW_ENDPOINT` or `AXONFLOW_AUTH`, the plugin connects to
 | Outbound message bodies before delivery (PII/secret scan) | Claude Code conversation history outside governed tools |
 | Anonymous 7-day heartbeat (plugin version, OS, runtime) | Files outside the Claude Code runtime |
 
-Community SaaS is intended for evaluation and prototyping. It has no SLA, no production guarantees, runs against shared Ollama models, and rate-limits at 20 req/min · 500 req/day per tenant. Read the [Try AxonFlow — Free Trial Server](https://docs.getaxonflow.com/docs/deployment/community-saas/) page for the full disclosure, including [data retention](https://docs.getaxonflow.com/docs/deployment/community-saas/#limitations-and-disclaimers) and [registration mechanics](https://docs.getaxonflow.com/docs/deployment/community-saas/#registration).
-
-### Self-hosted: your own AxonFlow
-
-For real workflows, real systems, or sensitive data, run AxonFlow on your own infrastructure. Everything stays local; nothing leaves your network except the anonymous 7-day heartbeat.
-
-```bash
-git clone https://github.com/getaxonflow/axonflow.git
-cd axonflow && docker compose up -d
-
-# verify
-curl -s http://localhost:8080/health | jq .
-
-# point the plugin at your local agent
-export AXONFLOW_ENDPOINT=http://localhost:8080
-```
-
-See the [Self-Hosted Deployment Guide](https://docs.getaxonflow.com/docs/deployment/self-hosted/) for prerequisites and production options. For production-scale workloads, [request an evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval). For compliance-grade SLA + enterprise features, [contact us](https://getaxonflow.com/enterprise).
+The endpoint runs against shared Ollama models, rate-limits at 20 req/min · 500 req/day per tenant, and is offered "as is" on a best-effort basis with no SLA, no warranties, no commitment to retention or deletion timelines, and may be modified or discontinued without notice. Read the [Try AxonFlow — Free Trial Server](https://docs.getaxonflow.com/docs/deployment/community-saas/) page for the full disclosure, including [data retention](https://docs.getaxonflow.com/docs/deployment/community-saas/#limitations-and-disclaimers) and [registration mechanics](https://docs.getaxonflow.com/docs/deployment/community-saas/#registration).
 
 ### Air-gapped: zero outbound
 
-For environments where no outbound traffic is permitted at all, set both:
+For environments where no outbound traffic is permitted at all — air-gapped labs, regulated networks, classified deployments — set both env vars before the Claude Code process starts:
 
 ```bash
 export AXONFLOW_COMMUNITY_SAAS=0   # disable Community SaaS auto-bootstrap
@@ -196,13 +234,7 @@ With both env vars set and `AXONFLOW_ENDPOINT` pointing at a same-network instan
 
 ## Configure
 
-The plugin emits a one-line canary on every hook invocation so you always know which AxonFlow you're connected to:
-
-```
-[AxonFlow] Connected to AxonFlow at https://try.getaxonflow.com (mode=community-saas)
-```
-
-To change connection target:
+[Step 3](#step-3-point-the-plugin-at-the-platform) above covers `AXONFLOW_ENDPOINT` and `AXONFLOW_AUTH`. Other connection options:
 
 ```bash
 # Self-hosted local agent
