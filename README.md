@@ -161,7 +161,7 @@ If you do not set `AXONFLOW_ENDPOINT` or `AXONFLOW_AUTH`, the plugin connects to
 | Outbound message bodies before delivery (PII/secret scan) | Claude Code conversation history outside governed tools |
 | Anonymous 7-day heartbeat (plugin version, OS, runtime) | Files outside the Claude Code runtime |
 
-Community SaaS is intended for evaluation and prototyping. Best-effort retention up to 1 year; tenants idle for 3 months are terminated. We don't offer reliability or security guarantees on the shared endpoint. Read the [Try AxonFlow — Free Trial Server](https://docs.getaxonflow.com/docs/deployment/community-saas/) page for the full disclosure, including data retention and registration mechanics.
+Community SaaS is intended for evaluation and prototyping. It has no SLA, no production guarantees, runs against shared Ollama models, and rate-limits at 20 req/min · 500 req/day per tenant. Read the [Try AxonFlow — Free Trial Server](https://docs.getaxonflow.com/docs/deployment/community-saas/) page for the full disclosure, including [data retention](https://docs.getaxonflow.com/docs/deployment/community-saas/#limitations-and-disclaimers) and [registration mechanics](https://docs.getaxonflow.com/docs/deployment/community-saas/#registration).
 
 ### Self-hosted: your own AxonFlow
 
