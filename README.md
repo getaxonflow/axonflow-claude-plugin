@@ -125,7 +125,7 @@ Org-wide policies and session overrides are **Enterprise-only** — those are th
 
 ## Privacy notice
 
-**Read before installing.** AxonFlow [Community SaaS](https://docs.getaxonflow.com/docs/deployment/community-saas/) at `try.getaxonflow.com` is the zero-config endpoint the plugin uses if neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is configured. In that mode, governed tool inputs (tool name + arguments) and outbound message bodies are sent off-host to AxonFlow's shared evaluation endpoint for policy evaluation and audit. **Community SaaS is for early exploration only** — not for production workloads, regulated environments, real user data, personal data, or any other sensitive information. It is offered "as is" on a best-effort basis with no SLA, no warranties, and no commitment to retention, deletion, or incident-response timelines.
+**Read before installing.** AxonFlow [Community SaaS](https://docs.getaxonflow.com/docs/deployment/community-saas/) at `try.getaxonflow.com` is the zero-config endpoint the plugin uses if neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is configured. In that mode, governed tool inputs (tool name + arguments) and outbound message bodies are checked by AxonFlow's policy enforcement endpoint. **Community SaaS is for early exploration only** — not for production workloads, regulated environments, real user data, personal data, or any other sensitive information. It is offered "as is" on a best-effort basis with no SLA, no warranties, and no commitment to retention, deletion, or incident-response timelines.
 
 For any serious use, choose one of the following instead:
 
@@ -344,7 +344,7 @@ axonflow-claude-plugin/
 ├── hooks/
 │   └── hooks.json         # PreToolUse + PostToolUse hook definitions
 ├── scripts/
-│   ├── pre-tool-check.sh    # Policy evaluation before tool execution
+│   ├── pre-tool-check.sh    # Policy enforcement before tool execution
 │   ├── post-tool-audit.sh   # Audit + PII scan after execution
 │   ├── mcp-auth-headers.sh  # Basic-auth header generation for MCP
 │   └── telemetry-ping.sh    # Anonymous telemetry (fires once per install)
