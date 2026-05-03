@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-05-03 — 5 read-side governance skills + 5 slash commands
+
 ### Added
 
 - **5 agent-callable governance skills + 5 slash commands.** Claude Code
