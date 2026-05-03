@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **5 agent-callable governance skills + 5 slash commands.** Claude Code
+  agents can now use AxonFlow's read-side governance surface in two
+  modes: skills (`audit-search`, `explain-decision`, `list-overrides`,
+  `create-override`, `revoke-override`) for autonomous in-conversation
+  use; and slash commands (`/axonflow-audit-search`,
+  `/axonflow-explain-decision`, `/axonflow-list-overrides`,
+  `/axonflow-create-override`, `/axonflow-revoke-override`) for
+  human-driven invocation. The underlying MCP tools are already exposed
+  by the platform via the plugin's `.mcp.json`; these wrappers document
+  when and how to invoke them.
+
 ## [1.0.0] - 2026-04-29 — Production, quality, and security hardening — upgrade encouraged
 
 **Upgrade strongly recommended.** Over the past month we've shipped substantial production, quality, and security hardening across the AxonFlow plugin and platform — upgrade to the latest version for a more secure, reliable, and bug-free experience.
