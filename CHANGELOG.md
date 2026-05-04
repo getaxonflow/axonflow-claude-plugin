@@ -2,32 +2,18 @@
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-05-04 — 5 read-side governance skills + 5 slash commands + outcome-based runtime tests
+## [1.1.0] - 2026-05-04 — 5 governance skills + 5 slash commands
 
 ### Added
 
-- **5 agent-callable governance skills + 5 slash commands.** Claude Code
-  agents can now use AxonFlow's read-side governance surface in two
-  modes: skills (`audit-search`, `explain-decision`, `list-overrides`,
-  `create-override`, `revoke-override`) for autonomous in-conversation
-  use; and slash commands (`/axonflow-audit-search`,
-  `/axonflow-explain-decision`, `/axonflow-list-overrides`,
-  `/axonflow-create-override`, `/axonflow-revoke-override`) for
-  human-driven invocation. The underlying MCP tools are already exposed
-  by the platform via the plugin's `.mcp.json`; these wrappers document
-  when and how to invoke them.
-- **Outcome-based runtime-e2e tests under `runtime-e2e/`.** Each of the
-  5 W2 features (`audit-search`, `list-overrides`, `create-override`,
-  `revoke-override`, `explain-decision`) plus a full-chain
-  `governance-lifecycle` integration test drives a real Claude Code
-  agent (`claude --plugin-dir`) through the natural-language path,
-  asserts the agent dispatched the MCP tool, AND asserts a real state
-  transition or platform fact (server-side override revoked, audit
-  marker found, decision named the policy that fired, count went up
-  then down across the lifecycle). Per the rule-#1 spirit — "if a user
-  cannot reach the feature from their runtime, we shipped a library,
-  not a feature". Tests skip cleanly when `claude` CLI or AxonFlow
-  stack is unavailable.
+- **5 agent-callable governance skills.** Claude Code agents can use
+  AxonFlow's read-side governance surface autonomously during a
+  conversation via skills: `audit-search`, `explain-decision`,
+  `list-overrides`, `create-override`, `revoke-override`.
+- **5 governance slash commands.** Human-driven counterparts:
+  `/axonflow-audit-search`, `/axonflow-explain-decision`,
+  `/axonflow-list-overrides`, `/axonflow-create-override`,
+  `/axonflow-revoke-override`.
 
 ## [1.0.0] - 2026-04-29 — Production, quality, and security hardening — upgrade encouraged
 
