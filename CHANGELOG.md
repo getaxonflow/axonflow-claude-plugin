@@ -34,6 +34,25 @@
   command helpers against a live community-saas agent + DB; SKIPs
   cleanly when no compatible stack is reachable.
 
+### Fixed
+
+- **`/axonflow-recover-verify` error output**: when the platform returned
+  a 4xx with the standard error envelope `{"error":{"code":N,"message":"..."}}`,
+  the script previously echoed the whole nested object as JSON instead
+  of the human-readable message. Replay-rejected tokens now surface as
+  `ERR  401 Recovery token has already been used` rather than a stringified
+  JSON blob.
+- **Runtime-e2e false negatives on developer laptops.** Both
+  `runtime-e2e/license-token/test.sh` (test 5) and
+  `runtime-e2e/recovery/test.sh` were tripping the agent's in-memory IP
+  rate limiter (5 calls/hour/IP, shared by `/api/v1/register` and
+  `/api/v1/recover`) after a few iterations against `localhost`. Tests
+  now spoof a unique `X-Forwarded-For` per run. The license-token
+  middleware probe also moved from `/api/request` (which has its own
+  tenant-credential 401 path that masked the middleware's verdict) to
+  `/api/v1/register` so a 401 cleanly attributes to the
+  PluginClaimMiddleware.
+
 ## [1.1.0] - 2026-05-04 — 5 governance skills + 5 slash commands
 
 ### Added

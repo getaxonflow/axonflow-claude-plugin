@@ -43,6 +43,15 @@ RECOVER_VERIFY_SH="${PLUGIN_DIR}/scripts/recover-verify.sh"
 CAPTURE_FILE="${AXONFLOW_RECOVERY_TEST_CAPTURE_FILE:-/tmp/axonflow-recovery-captures.txt}"
 TEST_EMAIL="${TEST_EMAIL:-claude-plugin-recovery-runtime-$$-$(date +%s)@axonflow-test.invalid}"
 
+# The agent's /api/v1/register and /api/v1/recover share an in-memory
+# IP-based rate limiter (5 calls/hour per IP, hardcoded). On a developer
+# laptop where the test runs against localhost many times in a session,
+# the limiter trips and silently swallows recovery requests (the platform
+# still returns 202 by anti-enumeration design, but no email is dispatched
+# and our capture file stays empty). Spoof a unique X-Forwarded-For per
+# run so each test execution looks like a fresh client to the limiter.
+TEST_XFF="${TEST_XFF:-10.99.$(( ( $$ % 200 ) + 30 )).$(( ( $(date +%s) % 200 ) + 30 ))}"
+
 for f in "$RECOVER_SH" "$RECOVER_VERIFY_SH"; do
   if [ ! -f "$f" ]; then
     echo "FAIL: required script missing: $f"
@@ -124,6 +133,7 @@ echo "Step 1: register a tenant bound to TEST_EMAIL"
 REG_BODY=$(jq -n --arg label "claude-plugin-recovery-test" --arg email "$TEST_EMAIL" '{label: $label, email: $email}')
 REG_RESP=$(curl -sS --max-time 10 -X POST "$AGENT_URL/api/v1/register" \
   -H "Content-Type: application/json" \
+  -H "X-Forwarded-For: $TEST_XFF" \
   -d "$REG_BODY" 2>/dev/null)
 ORIG_TENANT=$(echo "$REG_RESP" | jq -r '.tenant_id // empty' 2>/dev/null)
 if [ -z "$ORIG_TENANT" ]; then
@@ -147,7 +157,12 @@ fi
 # -----------------------------------------------------------------------------
 echo ""
 echo "Step 2: /axonflow-recover (via recover.sh) → 202 + magic link sent"
-RECOVER_OUT=$(AXONFLOW_ENDPOINT="$AGENT_URL" "$RECOVER_SH" "$TEST_EMAIL" 2>&1)
+# AXONFLOW_RECOVER_TEST_FORWARDED_FOR is the test-only escape hatch in
+# recover.sh that lets us spoof X-Forwarded-For around the agent's
+# in-memory IP rate limiter (see TEST_XFF block at top of this file).
+RECOVER_OUT=$(AXONFLOW_ENDPOINT="$AGENT_URL" \
+              AXONFLOW_RECOVER_TEST_FORWARDED_FOR="$TEST_XFF" \
+              "$RECOVER_SH" "$TEST_EMAIL" 2>&1)
 RECOVER_CODE=$?
 if [ "$RECOVER_CODE" -ne 0 ]; then
   echo "  FAIL: recover.sh exited $RECOVER_CODE"

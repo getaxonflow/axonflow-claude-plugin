@@ -17,6 +17,8 @@ The test SKIPs cleanly (exit 0) when the agent is unreachable, the agent is on t
 
 The test stashes any pre-existing `~/.config/axonflow/try-registration.json` and restores it on exit so it never trashes the developer's own credentials.
 
+The agent's `/api/v1/register` and `/api/v1/recover` share an in-memory IP-based rate limiter (5 calls/hour/IP). Because dev laptops typically run this test multiple times against the same `localhost` agent, the test spoofs a unique `X-Forwarded-For` per run via the `TEST_XFF` variable (set automatically from PID + epoch) and threads it through `recover.sh` via the test-only `AXONFLOW_RECOVER_TEST_FORWARDED_FOR` env hook. Production callers never set that env var; if they did, a real upstream proxy would overwrite the header before it reached the agent.
+
 **Run:**
 ```bash
 AGENT_URL=http://localhost:8080 \
