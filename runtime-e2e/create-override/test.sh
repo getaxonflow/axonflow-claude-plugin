@@ -1,20 +1,18 @@
 #!/usr/bin/env bash
-# Claude Code runtime E2E: create-override (W2 — rule #1)
+# Claude Code runtime E2E: create_override REJECTION OUTCOME (W2 — rule #1)
 #
-# Community mode does not allow override-able policies (every policy has
-# allow_override=false; organization-tier policies require an Evaluation
-# license). So this test exercises the dispatch path with a known
-# critical-risk policy ID — the platform will return 403 ("policy is
-# critical-risk") which is a valid runtime-path test outcome:
+# This test asserts the runtime dispatch path AND the rejection outcome.
+# Pre-migration-076 the platform happily created an override on
+# sys_sqli_admin_bypass even though the policy had severity='critical' —
+# the handler's allow_override=FALSE enforcement was unreachable because
+# zero seed rows had allow_override=FALSE. Migration 076 promotes
+# severity='critical' system policies to risk_level='critical' which
+# forces allow_override=FALSE; this test verifies the rejection now
+# fires through the actual MCP runtime path.
 #
-#   - The agent picked the tool from natural language (rule #1 ✓)
-#   - Claude Code's MCP runtime dispatched the call (rule #1 ✓)
-#   - The platform answered with a structured 403 (live stack reachable ✓)
-#   - The agent surfaced the rejection downstream (UX ✓)
-#
-# When run against an evaluation-license stack with a real allow_override
-# policy, runtime-e2e/governance-lifecycle/test.sh covers the full
-# happy-path create + list + revoke sequence.
+# Happy-path create + list + revoke is covered by
+# runtime-e2e/governance-lifecycle/test.sh against an overridable system
+# policy (sys_pii_email).
 
 set -uo pipefail
 
@@ -24,55 +22,61 @@ source "$SCRIPT_DIR/../_lib/claude-runtime.sh"
 
 runtime_e2e_skip_if_unavailable
 
-# sys_sqli_admin_bypass exists in the seeded community policies and has
-# allow_override=false. The server should return 403 — that's the
-# expected runtime-path outcome here. (We are deliberately NOT testing
-# the happy path because community mode blocks it; the lifecycle test
-# under governance-lifecycle/ covers happy-path on evaluation+ stacks.)
-PROMPT='Use the create_override MCP tool from the axonflow MCP server with policy_id="sys_sqli_admin_bypass", policy_type="static", and override_reason="runtime-e2e dispatch verification". The platform will reject this because the policy has allow_override=false. After receiving the tool result, output exactly "SMOKE_RESULT: " followed by a single-line JSON summary indicating whether the call dispatched and whether the platform returned an error, like SMOKE_RESULT: {"dispatched":true,"server_rejected":true}.'
+PROMPT='Use the create_override MCP tool from the axonflow MCP server with policy_id="sys_sqli_admin_bypass", policy_type="static", and override_reason="runtime-e2e rejection verification". The platform should reject this because sys_sqli_admin_bypass is severity=critical and cannot be session-overridden. After receiving the tool result, output exactly "SMOKE_RESULT: " followed by a single-line JSON like SMOKE_RESULT: {"dispatched":true,"server_rejected":true,"http_status":403} or SMOKE_RESULT: {"dispatched":true,"server_rejected":false} if the platform unexpectedly accepted the override.'
 
 OUTPUT_FILE=$(mktemp -t axonflow-claude-create.XXXXXX)
 trap 'rm -f "$OUTPUT_FILE"' EXIT
 
-echo "--- Running claude -p (create_override, expect 403) ---"
+echo "--- Running claude -p (create_override on sys_sqli_admin_bypass, expect 403) ---"
 run_claude_with_tool "__create_override" "$PROMPT" "$OUTPUT_FILE"
 
 errors=0
 
 if assert_tool_invoked "$OUTPUT_FILE" "__create_override"; then
-  echo "PASS: agent invoked an MCP tool ending in __create_override"
+  echo "PASS: agent invoked __create_override"
 else
-  echo "FAIL: agent did not invoke any *__create_override MCP tool"
+  echo "FAIL: agent did not invoke __create_override"
   errors=$((errors + 1))
 fi
 
 if assert_tool_result_present "$OUTPUT_FILE"; then
-  echo "PASS: MCP runtime returned a tool_result (live stack answered, even if 4xx)"
+  echo "PASS: MCP runtime returned a tool_result (live stack answered)"
 else
   echo "FAIL: no tool_result captured — runtime did not complete the call"
   errors=$((errors + 1))
 fi
 
-if assert_result_contains "$OUTPUT_FILE" "SMOKE_RESULT:"; then
-  echo "PASS: agent emitted SMOKE_RESULT marker (full pipeline executed)"
+# Outcome assertion — the tool_result MUST carry the platform's rejection
+# (not just dispatch success). Look for the orchestrator's 403 error message
+# or the canonical strings the handler emits at overrides_handler.go:340/344.
+TOOL_RESULT_TEXT=$(jq -c 'select(.type=="user") | .message.content[]? | select(.type=="tool_result")' \
+  "$OUTPUT_FILE" 2>/dev/null | jq -r '.. | strings? // empty' | tr '\n' ' ')
+
+if printf '%s' "$TOOL_RESULT_TEXT" | grep -q -E 'Critical-risk policies cannot be overridden|allow_override=false|cannot be session-overridden|403' ; then
+  echo "PASS: tool_result carries the platform 403 rejection (migration 076 enforcement reached the agent)"
 else
-  echo "FAIL: agent did not emit SMOKE_RESULT marker"
+  echo "FAIL: tool_result did not carry the expected platform rejection"
+  echo "      tool_result snippet: $(printf '%s' "$TOOL_RESULT_TEXT" | head -c 300)"
   errors=$((errors + 1))
 fi
 
-# Soft check that the agent recognised the rejection. Different models
-# phrase 4xx differently — we surface but don't hard-fail.
-if assert_result_contains "$OUTPUT_FILE" 'server_rejected' \
-  || assert_result_contains "$OUTPUT_FILE" 'reject' \
-  || assert_result_contains "$OUTPUT_FILE" 'allow_override' \
-  || assert_result_contains "$OUTPUT_FILE" '403' ; then
-  echo "INFO: agent surfaced the platform rejection (good — UX cue)"
+# Outcome assertion — the agent's final reply must acknowledge the rejection
+# in a structured way (the SMOKE_RESULT marker JSON), not just emit a free-
+# form apology. This is the "user-visible" half of the runtime claim.
+if assert_result_contains "$OUTPUT_FILE" '"server_rejected":true' \
+  || assert_result_contains "$OUTPUT_FILE" '"server_rejected": true'; then
+  echo "PASS: agent surfaced the rejection structurally (server_rejected:true in SMOKE_RESULT)"
+else
+  echo "FAIL: agent did not surface server_rejected:true in SMOKE_RESULT"
+  AGENT_RESULT=$(jq -r 'select(.type=="result") | .result' "$OUTPUT_FILE" 2>/dev/null | head -3)
+  echo "      agent reply: $AGENT_RESULT"
+  errors=$((errors + 1))
 fi
 
 if [ "$errors" -gt 0 ]; then
   echo ""
-  echo "FAIL: $errors runtime-path assertion(s) failed (output: $OUTPUT_FILE)"
+  echo "FAIL: $errors outcome-test assertion(s) failed (output: $OUTPUT_FILE)"
   exit 1
 fi
 echo ""
-echo "PASS: create-override — Claude Code agent dispatched create_override through MCP runtime end-to-end"
+echo "PASS: create-override — agent dispatched + platform rejected + agent surfaced rejection (end-to-end outcome)"
