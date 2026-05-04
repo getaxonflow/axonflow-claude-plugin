@@ -68,8 +68,11 @@ CODE=$(echo "$HTTP_RESP" | tail -n1)
 BODY=$(echo "$HTTP_RESP" | sed '$d')
 
 if [ "$CODE" != "200" ]; then
-  ERR_MSG=$(echo "$BODY" | jq -r '.error // empty' 2>/dev/null)
-  if [ -n "$ERR_MSG" ]; then
+  # Platform error envelope is {"error": {"code": N, "message": "..."}} —
+  # extract the human-readable message. Fall back to the raw body if the
+  # shape changes (e.g. middleware-injected text/plain bodies).
+  ERR_MSG=$(echo "$BODY" | jq -r '.error.message // .error // empty' 2>/dev/null)
+  if [ -n "$ERR_MSG" ] && [ "$ERR_MSG" != "null" ]; then
     echo "ERR  ${CODE} ${ERR_MSG}" >&2
   else
     echo "ERR  ${CODE} ${BODY}" >&2

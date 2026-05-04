@@ -50,13 +50,32 @@ fi
 
 REQ_BODY=$(jq -n --arg e "$EMAIL" '{email: $e}')
 
+# Test-only escape hatch: AXONFLOW_RECOVER_TEST_FORWARDED_FOR, when set,
+# spoofs X-Forwarded-For so the runtime-e2e suite can avoid the agent's
+# in-memory IP rate limiter (5/hr per IP) on dev machines that exercise
+# this path many times in a session. Production callers never set this
+# env var; if they did, a real reverse proxy upstream would overwrite the
+# header before it reached the agent.
+#
+# The two-branch curl invocation keeps us compatible with bash 3.2 (macOS
+# default) where empty-array expansion under `set -u` is unsafe.
+#
 # /api/v1/recover is unauthenticated by design (the user has lost their
 # credentials, that's the whole point), so no auth headers needed here.
-HTTP_RESP=$(curl -sS --max-time 10 -X POST "${ENDPOINT}/api/v1/recover" \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json" \
-  -d "$REQ_BODY" \
-  -w "\n%{http_code}" 2>/dev/null)
+if [ -n "${AXONFLOW_RECOVER_TEST_FORWARDED_FOR:-}" ]; then
+  HTTP_RESP=$(curl -sS --max-time 10 -X POST "${ENDPOINT}/api/v1/recover" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -H "X-Forwarded-For: ${AXONFLOW_RECOVER_TEST_FORWARDED_FOR}" \
+    -d "$REQ_BODY" \
+    -w "\n%{http_code}" 2>/dev/null)
+else
+  HTTP_RESP=$(curl -sS --max-time 10 -X POST "${ENDPOINT}/api/v1/recover" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    -d "$REQ_BODY" \
+    -w "\n%{http_code}" 2>/dev/null)
+fi
 CURL_EXIT=$?
 
 if [ "$CURL_EXIT" -ne 0 ]; then

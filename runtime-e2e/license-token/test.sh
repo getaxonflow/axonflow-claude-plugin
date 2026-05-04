@@ -288,27 +288,61 @@ rm -f "$EXISTING_LT"
 # -----------------------------------------------------------------------------
 # Test 5 (optional, requires live AGENT_URL + TEST_LICENSE_TOKEN):
 # the agent's PluginClaimMiddleware accepts a real token-bearing request.
+#
+# We hit /api/v1/register (Community-SaaS bootstrap endpoint). Important:
+# /api/request has its own tenant-credential auth that returns 401 BEFORE
+# any X-License-Token check, which would mask the middleware's verdict and
+# wrongly look like a middleware-reject. /api/v1/register sits behind the
+# PluginClaimMiddleware (mounted on globalRouter) but does NOT require
+# tenant credentials, so the only 401 it can produce in this test path is
+# "Invalid plugin license token" from the middleware itself.
+#
+# We use a unique X-Forwarded-For per run to avoid the agent's in-memory
+# IP-based registration rate limiter (5/hr/IP) — same rationale as the
+# recovery test.
 # -----------------------------------------------------------------------------
 if [ -n "${TEST_LICENSE_TOKEN:-}" ] && curl -sSf -o /dev/null --max-time 5 "$AGENT_URL/health" 2>/dev/null; then
   echo "Test 5: live agent accepts the AXON- token (PluginClaimMiddleware)"
-  REQ_BODY='{"client_id":"runtime-e2e-license-token","request_type":"audit","query":"runtime-e2e probe","skip_llm":true}'
-  HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "$AGENT_URL/api/request" \
+
+  # Unique per-run XFF (avoid registration IP rate limit on dev machines
+  # where this test runs many times against localhost).
+  TEST5_XFF="10.99.$(( ( $$ % 200 ) + 30 )).$(( ( $(date +%s) % 200 ) + 30 ))"
+  REG_EMAIL="rt-e2e-license-mw-$$-$(date +%s)@axonflow-test.invalid"
+  REG_BODY=$(jq -nc --arg e "$REG_EMAIL" '{label: "rt-e2e-mw-probe", email: $e}')
+
+  RESP_FILE=$(mktemp -t axonflow-mw-probe.XXXXXX)
+  HTTP_CODE=$(curl -sS -o "$RESP_FILE" -w "%{http_code}" -X POST "$AGENT_URL/api/v1/register" \
     -H "Content-Type: application/json" \
+    -H "X-Forwarded-For: $TEST5_XFF" \
     -H "X-License-Token: $TEST_LICENSE_TOKEN" \
-    -d "$REQ_BODY" 2>/dev/null || echo "000")
+    -d "$REG_BODY" 2>/dev/null || echo "000")
+  RESP_BODY=$(cat "$RESP_FILE" 2>/dev/null || echo "")
+  rm -f "$RESP_FILE"
+
   case "$HTTP_CODE" in
     2*)
-      echo "  PASS: agent accepted token-bearing /api/request (HTTP $HTTP_CODE)"
+      echo "  PASS: PluginClaimMiddleware accepted the token (HTTP $HTTP_CODE on /api/v1/register)"
       ;;
-    401|403)
-      echo "  FAIL: agent rejected token-bearing request (HTTP $HTTP_CODE) — token may be revoked or middleware misconfigured"
+    401)
+      # Disambiguate middleware-reject ("Invalid plugin license token") from
+      # any other 401 path. The middleware's exact rejection messages live
+      # in platform/agent/plugin_claim_middleware.go.
+      if echo "$RESP_BODY" | grep -qiE 'invalid plugin license token|license not found|license has been revoked'; then
+        echo "  FAIL: PluginClaimMiddleware rejected the token (HTTP 401: $RESP_BODY)"
+        errors=$((errors + 1))
+      else
+        echo "  NOTE: HTTP 401 but body does not look like middleware rejection — body: $RESP_BODY"
+      fi
+      ;;
+    403)
+      echo "  FAIL: PluginClaimMiddleware reported tenant mismatch (HTTP 403: $RESP_BODY)"
       errors=$((errors + 1))
       ;;
+    429)
+      echo "  NOTE: registration rate-limited (HTTP 429) — middleware accepted token (request proceeded past the middleware)"
+      ;;
     *)
-      # 4xx/5xx that isn't auth-related (e.g. 400 missing X-License-Key on
-      # an LLM route) is a soft pass — we proved the token wasn't bounced
-      # by the middleware itself. Document for diagnostics.
-      echo "  NOTE: agent returned HTTP $HTTP_CODE — not 401/403, so token wasn't rejected by middleware"
+      echo "  NOTE: agent returned HTTP $HTTP_CODE — not 401/403, so token wasn't rejected by middleware. body: $RESP_BODY"
       ;;
   esac
 else
