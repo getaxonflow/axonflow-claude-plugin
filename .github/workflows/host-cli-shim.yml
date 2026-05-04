@@ -1,0 +1,60 @@
+name: Host-CLI Shim
+
+# Higher-fidelity host-CLI smoke than test-hooks.sh / install-smoke.
+#
+# Stages the plugin payload as `claude plugin install` would, parses the
+# manifests (.claude-plugin/plugin.json, hooks/hooks.json, .mcp.json) the
+# same way the host CLI does, and drives the discovered hooks through
+# their JSON-on-stdin contract in the order the host runs them
+# (PreToolUse → tool → PostToolUse). Captures every agent request via a
+# stdlib HTTP stub and asserts the X-License-Token forwarding contract
+# across Free / Pro-env / Pro-file scenarios + the PreToolUse-deny path.
+#
+# What this catches that the existing tests don't:
+#   - Manifest-driven hook discovery breaking (e.g. someone renames a
+#     script but forgets hooks.json)
+#   - Lifecycle ordering regressions (PostToolUse running without
+#     PreToolUse first)
+#   - X-License-Token NOT reaching the wire on a path that's supposed
+#     to forward it (Pro tier silent regression)
+#   - .mcp.json's headersHelper dropping X-License-Token (claude#56)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'hooks/**'
+      - '.claude-plugin/**'
+      - '.mcp.json'
+      - 'tests/host-cli-shim/**'
+      - '.github/workflows/host-cli-shim.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'hooks/**'
+      - '.claude-plugin/**'
+      - '.mcp.json'
+      - 'tests/host-cli-shim/**'
+      - '.github/workflows/host-cli-shim.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-cli-shim-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  shim:
+    name: Host-CLI shim
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      AXONFLOW_TELEMETRY: 'off'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Run host-CLI shim
+        run: bash tests/host-cli-shim/run.sh
