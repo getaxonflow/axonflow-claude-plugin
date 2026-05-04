@@ -2,6 +2,38 @@
 
 ## [Unreleased]
 
+### Added
+
+- **V1 paid Pro tier wire-up.** Three new surfaces for the paid AxonFlow
+  Pro tier:
+  - `X-License-Token` HTTP header is now sent on every governed agent
+    request when a paid token is configured. Resolution order is
+    `AXONFLOW_LICENSE_TOKEN` env var first (wins), then
+    `~/.config/axonflow/license-token.json` on disk. The agent's plugin-
+    claim middleware validates the token and enriches the request
+    context with Pro-tier metadata (extended retention, higher daily
+    quotas, etc.). Free tier is unaffected — the header is simply
+    absent and the middleware passes through.
+  - `/axonflow-login <AXON-token>` slash command persists a paid
+    token to `~/.config/axonflow/license-token.json` (mode 0600 inside a
+    0700 directory; same security posture as `try-registration.json`).
+    Validates the `AXON-` prefix locally before writing.
+  - `/axonflow-recover <email>` and `/axonflow-recover-verify <token>`
+    slash commands drive the platform's free-tier email-recovery flow
+    end-to-end. Recovered credentials are persisted atomically to
+    `~/.config/axonflow/try-registration.json` so the next governed call
+    authenticates as the recovered tenant.
+- **Mode-clarity canary extension.** When a paid token is configured the
+  `pre-tool-check` hook emits an additional `[AxonFlow] Pro tier active
+  (X-License-Token configured)` line on stderr alongside the existing
+  `[AxonFlow] Connected to AxonFlow at <URL> (mode=...)` canary.
+- **Two new runtime-e2e tests.** `runtime-e2e/license-token/` proves the
+  `X-License-Token` header reaches the wire across all three resolution
+  modes (env, file, absent) via a Python `http.server` capture proxy.
+  `runtime-e2e/recovery/` drives the recover / recover-verify slash-
+  command helpers against a live community-saas agent + DB; SKIPs
+  cleanly when no compatible stack is reachable.
+
 ## [1.1.0] - 2026-05-04 — 5 governance skills + 5 slash commands
 
 ### Added

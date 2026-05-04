@@ -27,9 +27,34 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 
+# V1 paid Pro tier (axonflow-enterprise PR #1850): also resolve the paid-tier
+# license token so MCP-server traffic carries X-License-Token alongside the
+# Basic auth credential. Same env-then-file precedence as the hooks.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/license-token.sh"
+resolve_license_token
+
 AUTH="${AXONFLOW_AUTH:-}"
-if [ -n "$AUTH" ]; then
-  echo "{\"Authorization\": \"Basic $AUTH\"}"
+LICENSE_TOKEN="${AXONFLOW_LICENSE_TOKEN:-}"
+
+# Build the JSON header object via jq when available so token values are
+# json-escaped correctly. Without jq, fall back to the legacy bare-Authorization
+# shape (X-License-Token still ships on per-call hooks, which run independently).
+if command -v jq &>/dev/null; then
+  if [ -n "$AUTH" ] && [ -n "$LICENSE_TOKEN" ]; then
+    jq -nc --arg auth "$AUTH" --arg lt "$LICENSE_TOKEN" \
+      '{"Authorization": ("Basic " + $auth), "X-License-Token": $lt}'
+  elif [ -n "$AUTH" ]; then
+    jq -nc --arg auth "$AUTH" '{"Authorization": ("Basic " + $auth)}'
+  elif [ -n "$LICENSE_TOKEN" ]; then
+    jq -nc --arg lt "$LICENSE_TOKEN" '{"X-License-Token": $lt}'
+  else
+    echo "{}"
+  fi
 else
-  echo "{}"
+  if [ -n "$AUTH" ]; then
+    echo "{\"Authorization\": \"Basic $AUTH\"}"
+  else
+    echo "{}"
+  fi
 fi
