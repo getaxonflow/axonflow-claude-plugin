@@ -1,7 +1,7 @@
 {
   "name": "axonflow",
   "description": "Policy enforcement, PII detection, and audit trails for Claude Code. Govern tool execution, scan outputs for sensitive data, and maintain compliance-grade records of every action.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": {
     "name": "AxonFlow",
     "email": "hello@getaxonflow.com",
