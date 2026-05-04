@@ -198,6 +198,21 @@ Every hook invocation logs a one-line canary on stderr confirming the active mod
 
 If the canary says `mode=community-saas` after you ran Step 1, the plugin is still hitting `try.getaxonflow.com` because Step 3 was skipped or `AXONFLOW_ENDPOINT` is unset. Fix Step 3 and reload.
 
+### Check status
+
+Run `/axonflow-status` from any Claude Code session to see your `tenant_id`, the resolved AxonFlow endpoint, and current tier (`Free` vs `Pro`):
+
+```
+OK  endpoint=https://try.getaxonflow.com
+OK  tenant_id=cs_a1b2c3d4-...
+OK  tier=Free
+OK  license_token=unset
+OK  upgrade_url=https://getaxonflow.com/pro
+    Paste your tenant_id above into the 'AxonFlow tenant ID' custom field at checkout.
+```
+
+The `tenant_id` is the value to paste into the **AxonFlow tenant ID** custom field at Stripe checkout when upgrading to AxonFlow Pro. The license token is always shown redacted (`set (AXON-...XXXX)`) — the full bearer credential is never printed, so the output is safe to screen-share or paste into a support ticket.
+
 ---
 
 ## Mode-specific reference

@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`/axonflow-status` slash command.** Prints a one-screen status block
+  with the resolved AxonFlow endpoint, the user's `tenant_id` (read from
+  `~/.config/axonflow/try-registration.json`, or
+  `$AXONFLOW_CONFIG_DIR/try-registration.json` when set), current tier
+  (`Free` vs `Pro`), the redacted license-token preview
+  (`set (AXON-...XXXX)`), and — for Free-tier users — the upgrade URL
+  (`AXONFLOW_UPGRADE_URL` env or `https://getaxonflow.com/pro`). The
+  `tenant_id` line is the value buyers paste into the Stripe checkout
+  custom field when upgrading to AxonFlow Pro. Token output is always
+  truncated to the last 4 characters — the full bearer credential is
+  never printed, since `/axonflow-status` is a screen-share / support-
+  ticket / log-pipe surface (mirrors the `axonflow-codex-plugin`
+  token-leak fix).
 - **V1 paid Pro tier wire-up.** Three new surfaces for the paid AxonFlow
   Pro tier:
   - `X-License-Token` HTTP header is now sent on every governed agent
