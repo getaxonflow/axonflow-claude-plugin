@@ -61,11 +61,50 @@ for f in .claude-plugin/plugin.json .mcp.json hooks/hooks.json \
          scripts/pre-tool-check.sh scripts/post-tool-audit.sh \
          scripts/telemetry-ping.sh scripts/mcp-auth-headers.sh \
          scripts/license-token.sh scripts/login.sh \
-         scripts/recover.sh scripts/recover-verify.sh; do
+         scripts/recover.sh scripts/recover-verify.sh \
+         scripts/status.sh; do
   if [ -f "$STAGE_DIR/$f" ]; then pass "staged $f"
   else fail "missing $f after stage"
   fi
 done
+
+# 2b. status.sh smoke — invoke the staged script against an empty
+# AXONFLOW_CONFIG_DIR (no registration file, no license token) and
+# assert the Free-tier output shape PLUS that no full-token-shaped
+# string ever appears in stdout. The latter is the regression guard
+# axonflow-codex-plugin#41 added — /axonflow-status is a screen-share
+# surface, the bearer credential must never appear there.
+STATUS_TMP=$(mktemp -d 2>/dev/null || mktemp -d -t axonflow-status)
+STATUS_OUT=$(AXONFLOW_LICENSE_TOKEN='' \
+  HOME="$STATUS_TMP" \
+  AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
+  "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
+if echo "$STATUS_OUT" | grep -q "tier=Free"; then pass "status.sh Free-tier path"
+else fail "status.sh Free-tier path missing 'tier=Free': $STATUS_OUT"
+fi
+if echo "$STATUS_OUT" | grep -q "license_token=unset"; then pass "status.sh prints license_token=unset on Free"
+else fail "status.sh missing 'license_token=unset': $STATUS_OUT"
+fi
+if echo "$STATUS_OUT" | grep -q "upgrade_url="; then pass "status.sh prints upgrade_url on Free"
+else fail "status.sh missing upgrade_url: $STATUS_OUT"
+fi
+# Regression guard for token-leak (mirrors codex#41 Test 6c).
+FAKE_TOKEN="AXON-fake-status-test-token-must-be-32-chars-long-XYZW"
+PRO_OUT=$(AXONFLOW_LICENSE_TOKEN="$FAKE_TOKEN" \
+  HOME="$STATUS_TMP" \
+  AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
+  "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
+if echo "$PRO_OUT" | grep -q "tier=Pro"; then pass "status.sh Pro-tier path"
+else fail "status.sh Pro-tier path missing 'tier=Pro': $PRO_OUT"
+fi
+if echo "$PRO_OUT" | grep -qF "$FAKE_TOKEN"; then
+  fail "status.sh leaked the full token to stdout — bearer credential MUST be redacted"
+else pass "status.sh redacts full license token (no full-token leak)"
+fi
+if echo "$PRO_OUT" | grep -q "AXON-\.\.\.XYZW"; then pass "status.sh shows last-4-chars preview"
+else fail "status.sh missing last-4-chars token preview: $PRO_OUT"
+fi
+rm -rf "$STATUS_TMP"
 
 # 3. Validate hooks.json hook command paths resolve to staged scripts.
 HOOKS_JSON="$STAGE_DIR/hooks/hooks.json"
