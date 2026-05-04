@@ -101,7 +101,28 @@ Step 6: Call search_audit_events with limit=20.
 Output exactly the literal text SMOKE_RESULT: followed by a single-line JSON summary including all the state you captured: {\"baseline_count\":N1,\"after_create_count\":N2,\"after_revoke_count\":N3,\"created_id\":\"...\",\"revoke_dispatched\":true|false}."
 
 OUTPUT_FILE=$(mktemp -t axonflow-claude-lifecycle.XXXXXX)
-trap 'rm -f "$OUTPUT_FILE"' EXIT
+
+# Best-effort cleanup of any override the agent created if the test fails
+# mid-chain. We match by reason tag — REASON_TAG is unique per run so this
+# can't accidentally revoke unrelated overrides on a stack with churn.
+cleanup() {
+  if [ -n "${REASON_TAG:-}" ]; then
+    LEAKED_IDS=$(curl -s -X GET \
+      -H "$AXONFLOW_AUTH_HDR" \
+      -H "X-Tenant-ID: local-dev-org" \
+      "$AXONFLOW_ENDPOINT/api/v1/overrides" \
+      | jq -r --arg t "$REASON_TAG" '.overrides[]? | select(.override_reason == $t) | .id' 2>/dev/null)
+    for lid in $LEAKED_IDS; do
+      curl -s -X DELETE \
+        -H "$AXONFLOW_AUTH_HDR" \
+        -H "X-Tenant-ID: local-dev-org" \
+        -H "X-User-Email: dev@getaxonflow.com" \
+        "$AXONFLOW_ENDPOINT/api/v1/overrides/$lid" >/dev/null 2>&1 || true
+    done
+  fi
+  rm -f "${OUTPUT_FILE:-}"
+}
+trap cleanup EXIT
 
 echo "--- Driving Claude Code through the full W2 lifecycle ---"
 run_claude_with_tool "__list_overrides" "$PROMPT" "$OUTPUT_FILE"
