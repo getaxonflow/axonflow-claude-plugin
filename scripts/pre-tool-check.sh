@@ -51,10 +51,35 @@ echo "[AxonFlow] Connected to AxonFlow at ${ENDPOINT} (mode=${AXONFLOW_MODE})" >
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 AUTH="${AXONFLOW_AUTH:-}"
 
+# V1 paid Pro tier (axonflow-enterprise PR #1850): resolve the license token
+# from env (AXONFLOW_LICENSE_TOKEN — wins) or ~/.config/axonflow/license-token.json
+# (written by `/axonflow-login --token <AXON-...>`). When present, the plugin
+# sends it as X-License-Token on every governed agent request so the agent's
+# PluginClaimMiddleware enriches the request context with Pro-tier metadata
+# (retention, quota, …). Free tier is unaffected — the header is simply
+# absent and the middleware passes through (PluginClaimContext == nil).
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/license-token.sh"
+resolve_license_token
+
 # Build auth header array safely (avoids word-splitting)
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then
   AUTH_HEADER=(-H "Authorization: Basic $AUTH")
+fi
+# X-License-Token is appended to AUTH_HEADER so it ships on every curl call
+# below — both the check_policy POST and the audit_tool_call POST. PR #1850
+# defined PluginClaimMiddleware; whichever routes the platform mounts it
+# on will then read the header and enrich the request context. Routes
+# that don't read it ignore the extra header (HTTP servers are required
+# to tolerate unknown headers), so the plugin can send it consistently
+# without coordinating mount points.
+if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
+  AUTH_HEADER+=(-H "X-License-Token: ${AXONFLOW_LICENSE_TOKEN}")
+  # Mode-clarity canary extension — surface "Pro tier active" so the
+  # operator sees a paid token is in play. Stamp on stderr only — stdout is
+  # the hook protocol and any byte there breaks Claude Code's parser.
+  echo "[AxonFlow] Pro tier active (X-License-Token configured)" >&2
 fi
 
 # One-time positive disclosure when first connecting to Community SaaS. Stamp

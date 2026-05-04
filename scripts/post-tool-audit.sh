@@ -35,9 +35,18 @@ REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-5}"
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 AUTH="${AXONFLOW_AUTH:-}"
 
+# V1 paid Pro tier (axonflow-enterprise PR #1850): match pre-tool-check's
+# header policy so the audit + scan calls also surface the X-License-Token.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/license-token.sh"
+resolve_license_token
+
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then
   AUTH_HEADER=(-H "Authorization: Basic $AUTH")
+fi
+if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
+  AUTH_HEADER+=(-H "X-License-Token: ${AXONFLOW_LICENSE_TOKEN}")
 fi
 
 # Read hook input from stdin
