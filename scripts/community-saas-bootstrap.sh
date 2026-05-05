@@ -209,9 +209,14 @@ LABEL="claude-code-plugin@${PLUGIN_VERSION} / $(uname -s)-$(uname -m)"
 HTTP_CODE_FILE="$(mktemp 2>/dev/null)" || { return 0 2>/dev/null || exit 0; }
 RESPONSE_BODY_FILE="$(mktemp 2>/dev/null)" || { return 0 2>/dev/null || exit 0; }
 
+# ADR-050 §4: identify ourselves to the agent so it can derive request scope.
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/client-header.sh"
+
 curl -sS --max-time 10 -o "$RESPONSE_BODY_FILE" -w "%{http_code}" \
   -X POST "$REGISTER_URL" \
   -H "Content-Type: application/json" \
+  -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" \
   -d "$(jq -n --arg label "$LABEL" '{label: $label}')" \
   >"$HTTP_CODE_FILE" 2>/dev/null
 

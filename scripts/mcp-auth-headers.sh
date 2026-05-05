@@ -34,27 +34,38 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/license-token.sh"
 resolve_license_token
 
+# ADR-050 §4: every governed request to the agent carries X-Axonflow-Client
+# so the agent can derive request scope (plugin) and validate it against the
+# token's aud.scope via HasScope(). Sourced from .claude-plugin/plugin.json
+# (no env override — the consumer doesn't get to spoof its own client identity).
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/client-header.sh"
+
 AUTH="${AXONFLOW_AUTH:-}"
 LICENSE_TOKEN="${AXONFLOW_LICENSE_TOKEN:-}"
+CLIENT_HEADER="${AXONFLOW_CLIENT_HEADER}"
 
 # Build the JSON header object via jq when available so token values are
-# json-escaped correctly. Without jq, fall back to the legacy bare-Authorization
-# shape (X-License-Token still ships on per-call hooks, which run independently).
+# json-escaped correctly. Without jq, fall back to a bare Authorization +
+# X-Axonflow-Client shape (X-License-Token would need careful escaping so
+# we drop it on this legacy path; per-call hooks still ship it).
 if command -v jq &>/dev/null; then
   if [ -n "$AUTH" ] && [ -n "$LICENSE_TOKEN" ]; then
-    jq -nc --arg auth "$AUTH" --arg lt "$LICENSE_TOKEN" \
-      '{"Authorization": ("Basic " + $auth), "X-License-Token": $lt}'
+    jq -nc --arg auth "$AUTH" --arg lt "$LICENSE_TOKEN" --arg ch "$CLIENT_HEADER" \
+      '{"Authorization": ("Basic " + $auth), "X-License-Token": $lt, "X-Axonflow-Client": $ch}'
   elif [ -n "$AUTH" ]; then
-    jq -nc --arg auth "$AUTH" '{"Authorization": ("Basic " + $auth)}'
+    jq -nc --arg auth "$AUTH" --arg ch "$CLIENT_HEADER" \
+      '{"Authorization": ("Basic " + $auth), "X-Axonflow-Client": $ch}'
   elif [ -n "$LICENSE_TOKEN" ]; then
-    jq -nc --arg lt "$LICENSE_TOKEN" '{"X-License-Token": $lt}'
+    jq -nc --arg lt "$LICENSE_TOKEN" --arg ch "$CLIENT_HEADER" \
+      '{"X-License-Token": $lt, "X-Axonflow-Client": $ch}'
   else
-    echo "{}"
+    jq -nc --arg ch "$CLIENT_HEADER" '{"X-Axonflow-Client": $ch}'
   fi
 else
   if [ -n "$AUTH" ]; then
-    echo "{\"Authorization\": \"Basic $AUTH\"}"
+    echo "{\"Authorization\": \"Basic $AUTH\", \"X-Axonflow-Client\": \"$CLIENT_HEADER\"}"
   else
-    echo "{}"
+    echo "{\"X-Axonflow-Client\": \"$CLIENT_HEADER\"}"
   fi
 fi

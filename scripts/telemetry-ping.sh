@@ -162,7 +162,11 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SDK_VERSION=$(jq -r '.version // "unknown"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "unknown")
 
 # /health probe is best-effort: 2s timeout, null on failure or missing field.
-PLATFORM_VERSION=$(curl -s --max-time 2 "${ENDPOINT}/health" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || echo "")
+# ADR-050 §4: even unauthenticated /health probes carry X-Axonflow-Client.
+# (The Lambda checkpoint POST below is NOT to the agent — no header needed.)
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/client-header.sh"
+PLATFORM_VERSION=$(curl -s --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || echo "")
 if [ -z "$PLATFORM_VERSION" ] || [ "$PLATFORM_VERSION" = "null" ]; then
   PLATFORM_VERSION="null"
 else

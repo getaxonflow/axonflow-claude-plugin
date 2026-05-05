@@ -49,12 +49,18 @@ fi
 
 REQ_BODY=$(jq -n --arg t "$TOKEN" '{token: $t}')
 
+# ADR-050 §4: identify ourselves to the agent so it can derive request scope.
+# shellcheck disable=SC1091
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+. "${SCRIPT_DIR}/client-header.sh"
+
 # POST consumes the token (GET would just render the HTML confirmation
 # page). /api/v1/recover/verify is unauthenticated by design — the
 # token IS the auth.
 HTTP_RESP=$(curl -sS --max-time 10 -X POST "${ENDPOINT}/api/v1/recover/verify" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
+  -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" \
   -d "$REQ_BODY" \
   -w "\n%{http_code}" 2>/dev/null)
 CURL_EXIT=$?
