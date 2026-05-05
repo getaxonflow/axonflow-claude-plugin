@@ -74,13 +74,41 @@ done
 # string ever appears in stdout. The latter is the regression guard
 # axonflow-codex-plugin#41 added — /axonflow-status is a screen-share
 # surface, the bearer credential must never appear there.
+#
+# Three tier-line shapes covered (V1 Pro launch — tier-line surface parity
+# with codex/cursor/openclaw):
+#   - Free  (no token)            → "tier=Free (no Pro license configured)"
+#   - Pro   (active, exp future)  → "tier=Pro (expires YYYY-MM-DD, N days remaining)"
+#   - Free  (Pro expired)         → "tier=Free (Pro expired YYYY-MM-DD — visit ... to renew)"
 STATUS_TMP=$(mktemp -d 2>/dev/null || mktemp -d -t axonflow-status)
+
+# Helper: mint a structurally-valid AXON- token whose JWT payload contains
+# a given exp (unix epoch). Signature is a placeholder — status.sh only
+# parses, never validates. base64url with padding stripped, per RFC 7515.
+mint_axon_jwt() {
+  local exp_epoch="$1"
+  # Header + payload base64url-encoded with no padding. The JSON below is
+  # deliberately minimal — only `exp` is read; other claims are noise.
+  local hdr
+  hdr=$(printf '%s' '{"alg":"EdDSA","typ":"JWT"}' | base64 | tr '+/' '-_' | tr -d '=')
+  local payload
+  payload=$(printf '{"sub":"smoke","exp":%s}' "$exp_epoch" | base64 | tr '+/' '-_' | tr -d '=')
+  # Pad the whole token out to ≥32 chars after AXON- prefix so it passes
+  # license_token_looks_valid in license-token.sh. Real signatures are
+  # ~88 chars (Ed25519 base64url); a 64-char placeholder is plenty.
+  local sig="placeholder-signature-padding-padding-padding-padding-padding-pa"
+  printf 'AXON-%s.%s.%s' "$hdr" "$payload" "$sig"
+}
+
+# Free-tier path: no env token, no file. Expect "tier=Free (no Pro license configured)".
 STATUS_OUT=$(AXONFLOW_LICENSE_TOKEN='' \
   HOME="$STATUS_TMP" \
   AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
   "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
-if echo "$STATUS_OUT" | grep -q "tier=Free"; then pass "status.sh Free-tier path"
-else fail "status.sh Free-tier path missing 'tier=Free': $STATUS_OUT"
+if echo "$STATUS_OUT" | grep -q "tier=Free (no Pro license configured)"; then
+  pass "status.sh Free-tier line shape"
+else
+  fail "status.sh Free-tier line missing expected shape; output: $STATUS_OUT"
 fi
 if echo "$STATUS_OUT" | grep -q "license_token=unset"; then pass "status.sh prints license_token=unset on Free"
 else fail "status.sh missing 'license_token=unset': $STATUS_OUT"
@@ -88,22 +116,54 @@ fi
 if echo "$STATUS_OUT" | grep -q "upgrade_url="; then pass "status.sh prints upgrade_url on Free"
 else fail "status.sh missing upgrade_url: $STATUS_OUT"
 fi
-# Regression guard for token-leak (mirrors codex#41 Test 6c).
-FAKE_TOKEN="AXON-fake-status-test-token-must-be-32-chars-long-XYZW"
-PRO_OUT=$(AXONFLOW_LICENSE_TOKEN="$FAKE_TOKEN" \
+
+# Pro-tier active path: mint a token with exp ~30 days in the future.
+# Expect "tier=Pro (expires <date>, <N> days remaining)".
+PRO_EXP=$(( $(date -u +%s) + 30 * 86400 ))
+PRO_TOKEN=$(mint_axon_jwt "$PRO_EXP")
+PRO_OUT=$(AXONFLOW_LICENSE_TOKEN="$PRO_TOKEN" \
   HOME="$STATUS_TMP" \
   AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
   "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
-if echo "$PRO_OUT" | grep -q "tier=Pro"; then pass "status.sh Pro-tier path"
-else fail "status.sh Pro-tier path missing 'tier=Pro': $PRO_OUT"
+if echo "$PRO_OUT" | grep -qE "tier=Pro \(expires [0-9]{4}-[0-9]{2}-[0-9]{2}, [0-9]+ days remaining\)"; then
+  pass "status.sh Pro-active line shape (expires YYYY-MM-DD, N days remaining)"
+else
+  fail "status.sh Pro-active line missing expected shape; output: $PRO_OUT"
 fi
-if echo "$PRO_OUT" | grep -qF "$FAKE_TOKEN"; then
+if echo "$PRO_OUT" | grep -qF "$PRO_TOKEN"; then
   fail "status.sh leaked the full token to stdout — bearer credential MUST be redacted"
-else pass "status.sh redacts full license token (no full-token leak)"
+else
+  pass "status.sh redacts full license token (no full-token leak)"
 fi
-if echo "$PRO_OUT" | grep -q "AXON-\.\.\.XYZW"; then pass "status.sh shows last-4-chars preview"
-else fail "status.sh missing last-4-chars token preview: $PRO_OUT"
+# Last-4 redaction guard. The minted token ends with "padding-pa" — last 4
+# chars are "g-pa". Use a substring match so the test isn't sensitive to
+# the exact tail (any future tweak to the placeholder still passes).
+PRO_TAIL4="${PRO_TOKEN: -4}"
+if echo "$PRO_OUT" | grep -qF "AXON-...${PRO_TAIL4}"; then
+  pass "status.sh shows last-4-chars preview (AXON-...${PRO_TAIL4})"
+else
+  fail "status.sh missing last-4-chars token preview: $PRO_OUT"
 fi
+
+# Pro-expired path: mint a token with exp ~365 days IN THE PAST. Expect
+# "tier=Free (Pro expired <date> — visit ... to renew)".
+EXPIRED_EXP=$(( $(date -u +%s) - 365 * 86400 ))
+EXPIRED_TOKEN=$(mint_axon_jwt "$EXPIRED_EXP")
+EXPIRED_OUT=$(AXONFLOW_LICENSE_TOKEN="$EXPIRED_TOKEN" \
+  HOME="$STATUS_TMP" \
+  AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
+  "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
+if echo "$EXPIRED_OUT" | grep -qE "tier=Free \(Pro expired [0-9]{4}-[0-9]{2}-[0-9]{2} — visit https?://[^ ]+ to renew\)"; then
+  pass "status.sh Pro-expired line shape (Pro expired YYYY-MM-DD — visit ... to renew)"
+else
+  fail "status.sh Pro-expired line missing expected shape; output: $EXPIRED_OUT"
+fi
+if echo "$EXPIRED_OUT" | grep -qF "$EXPIRED_TOKEN"; then
+  fail "status.sh leaked expired token to stdout"
+else
+  pass "status.sh redacts expired token"
+fi
+
 rm -rf "$STATUS_TMP"
 
 # 3. Validate hooks.json hook command paths resolve to staged scripts.

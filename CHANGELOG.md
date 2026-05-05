@@ -4,6 +4,19 @@
 
 ### Added
 
+- **`/axonflow-status` tier line now surfaces Pro license expiry.** The
+  status output's `tier=` line parses the JWT `exp` claim from the
+  configured Pro license token and renders one of three shapes: `Pro
+  (expires YYYY-MM-DD, N days remaining)` when active, `Free (Pro
+  expired YYYY-MM-DD — visit https://getaxonflow.com/pro to renew)`
+  when the token is on disk but its `exp` has passed (plugin will not
+  forward an expired token), or `Free (no Pro license configured)`
+  when no token is loaded. Lets users see their renewal date without
+  hitting the agent and catches the lapsed-token state before their
+  next governed call. Display only — JWT signature validation remains
+  the platform's job. Adds a companion `skills/axonflow-status/SKILL.md`
+  so the model knows when to invoke `/axonflow-status` from natural-
+  language prompts ("when does my Pro license expire?").
 - **`/axonflow-status` slash command.** Prints a one-screen status block
   with the resolved AxonFlow endpoint, the user's `tenant_id` (read from
   `~/.config/axonflow/try-registration.json`, or
