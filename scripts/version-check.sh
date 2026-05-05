@@ -49,7 +49,10 @@ if [ -z "$PLUGIN_VERSION" ]; then
   exit 0
 fi
 
-HEALTH_BODY=$(curl -s --max-time 2 "${ENDPOINT}/health" 2>/dev/null)
+# ADR-050 §4: even unauthenticated probes carry X-Axonflow-Client.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/client-header.sh"
+HEALTH_BODY=$(curl -s --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null)
 if [ -z "$HEALTH_BODY" ]; then
   # Platform unreachable — don't stamp, retry next time
   exit 0

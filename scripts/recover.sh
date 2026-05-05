@@ -62,10 +62,17 @@ REQ_BODY=$(jq -n --arg e "$EMAIL" '{email: $e}')
 #
 # /api/v1/recover is unauthenticated by design (the user has lost their
 # credentials, that's the whole point), so no auth headers needed here.
+# ADR-050 §4: identify ourselves to the agent so it can derive request scope.
+# /api/v1/recover is unauthenticated by design but the header still belongs.
+# shellcheck disable=SC1091
+SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+. "${SCRIPT_DIR}/client-header.sh"
+
 if [ -n "${AXONFLOW_RECOVER_TEST_FORWARDED_FOR:-}" ]; then
   HTTP_RESP=$(curl -sS --max-time 10 -X POST "${ENDPOINT}/api/v1/recover" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
+    -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" \
     -H "X-Forwarded-For: ${AXONFLOW_RECOVER_TEST_FORWARDED_FOR}" \
     -d "$REQ_BODY" \
     -w "\n%{http_code}" 2>/dev/null)
@@ -73,6 +80,7 @@ else
   HTTP_RESP=$(curl -sS --max-time 10 -X POST "${ENDPOINT}/api/v1/recover" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
+    -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" \
     -d "$REQ_BODY" \
     -w "\n%{http_code}" 2>/dev/null)
 fi

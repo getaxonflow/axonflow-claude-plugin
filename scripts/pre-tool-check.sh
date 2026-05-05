@@ -62,11 +62,18 @@ AUTH="${AXONFLOW_AUTH:-}"
 . "${SCRIPT_DIR}/license-token.sh"
 resolve_license_token
 
+# ADR-050 §4: every governed request to the agent carries X-Axonflow-Client
+# so the agent can derive request scope (plugin) and validate it against the
+# token's aud.scope via HasScope().
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/client-header.sh"
+
 # Build auth header array safely (avoids word-splitting)
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then
   AUTH_HEADER=(-H "Authorization: Basic $AUTH")
 fi
+AUTH_HEADER+=(-H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}")
 # X-License-Token is appended to AUTH_HEADER so it ships on every curl call
 # below — both the check_policy POST and the audit_tool_call POST. PR #1850
 # defined PluginClaimMiddleware; whichever routes the platform mounts it

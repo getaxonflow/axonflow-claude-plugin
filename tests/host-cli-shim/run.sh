@@ -18,11 +18,10 @@
 #      agent request includes (or omits) X-License-Token according to tier.
 #   3. The headersHelper from .mcp.json — invoked once per host MCP-session
 #      bootstrap — emits a header set that includes X-License-Token when a
-#      Pro license is present. (This catches the regression in claude#56:
-#      the inline-bash headersHelper drops X-License-Token, so MCP traffic
-#      gets Free-tier treatment for Pro users. Today this assertion is
-#      EXPECTED to fail on Pro tiers — the test marks it as XFAIL until
-#      claude#56 lands. See `expect_mcp_token_forwarded` below.)
+#      Pro license is present, plus X-Axonflow-Client on every tier. The
+#      pre-existing inline-bash headersHelper used to drop X-License-Token
+#      (claude#56). The .mcp.json now points at scripts/mcp-auth-headers.sh
+#      so the helper runs the same code path the per-call hooks do.
 #   4. Free-tier scenario: NO captured request carries X-License-Token.
 #   5. PreToolUse deny path: when the policy stub answers `allowed=false`,
 #      the hook output JSON includes `permissionDecision=deny` AND a follow-
@@ -191,6 +190,13 @@ captured_with_license_token() {
   jq -s 'map(select(.headers["x-license-token"] != null)) | length' "$CAPTURE_FILE"
 }
 
+# Returns the count of captured requests carrying X-Axonflow-Client (ADR-050 §4).
+# Header value is normalized to lowercase by the stub-server capture path,
+# so we look for the lowercased key.
+captured_with_client_header() {
+  jq -s 'map(select(.headers["x-axonflow-client"] != null)) | length' "$CAPTURE_FILE"
+}
+
 # Returns the count of captured requests for a given JSON-RPC tool name.
 captured_with_tool() {
   local tool="$1"
@@ -228,11 +234,27 @@ LIC_COUNT=$(captured_with_license_token)
 [ "$LIC_COUNT" -eq 0 ] && pass "Free: NO captured requests carry X-License-Token" \
   || fail "Free: $LIC_COUNT request(s) carried X-License-Token (should be 0)"
 
+# ADR-050 §4: X-Axonflow-Client ships on EVERY request regardless of tier.
+CLIENT_COUNT=$(captured_with_client_header)
+TOTAL_COUNT_FREE=$(jq -s 'length' "$CAPTURE_FILE")
+if [ "$CLIENT_COUNT" -ge 1 ] && [ "$CLIENT_COUNT" -eq "$TOTAL_COUNT_FREE" ]; then
+  pass "Free: ALL $TOTAL_COUNT_FREE captured request(s) carry X-Axonflow-Client"
+else
+  fail "Free: $CLIENT_COUNT of $TOTAL_COUNT_FREE captured requests carried X-Axonflow-Client (expected all)"
+fi
+
 HEADERS_FREE=$(invoke_headers_helper)
 if echo "$HEADERS_FREE" | jq -e 'has("X-License-Token") | not' >/dev/null 2>&1; then
   pass "Free: headersHelper omits X-License-Token"
 else
   fail "Free: headersHelper unexpectedly emitted X-License-Token: $HEADERS_FREE"
+fi
+
+# ADR-050 §4: headersHelper also includes X-Axonflow-Client on Free tier.
+if echo "$HEADERS_FREE" | jq -e '."X-Axonflow-Client" | startswith("claude-code-plugin/")' >/dev/null 2>&1; then
+  pass "Free: headersHelper includes X-Axonflow-Client"
+else
+  fail "Free: headersHelper missing X-Axonflow-Client: $HEADERS_FREE"
 fi
 
 # ---------------------------------------------------------------------------
@@ -252,20 +274,27 @@ else
   fail "Pro/env: $LIC_COUNT of $TOTAL_COUNT captured requests carried X-License-Token (expected all)"
 fi
 
+# ADR-050 §4: X-Axonflow-Client ships on EVERY request, including Pro/env.
+CLIENT_COUNT=$(captured_with_client_header)
+if [ "$CLIENT_COUNT" -eq "$TOTAL_COUNT" ]; then
+  pass "Pro/env: ALL $TOTAL_COUNT captured request(s) carry X-Axonflow-Client"
+else
+  fail "Pro/env: $CLIENT_COUNT of $TOTAL_COUNT carried X-Axonflow-Client (expected all)"
+fi
+
 # Verify the token value is actually the one we set, not a placeholder.
 TOKEN_OBSERVED=$(jq -s -r '.[0].headers["x-license-token"] // empty' "$CAPTURE_FILE")
 [ "$TOKEN_OBSERVED" = "$LICENSE_TOKEN" ] && pass "Pro/env: captured token value matches AXONFLOW_LICENSE_TOKEN" \
   || fail "Pro/env: captured token '$TOKEN_OBSERVED' != env '$LICENSE_TOKEN'"
 
-# headersHelper assertion for MCP path. Today's .mcp.json on Claude Code
-# bypasses scripts/mcp-auth-headers.sh so the headersHelper output drops
-# X-License-Token. Tracked as claude#56. Mark XFAIL until that lands so
-# this test stays green and turns into a regression alarm post-fix.
+# headersHelper assertion for MCP path. .mcp.json points at
+# scripts/mcp-auth-headers.sh which runs the same code path as per-call
+# hooks, so X-License-Token is forwarded the same way on the MCP session.
 HEADERS_PRO=$(invoke_headers_helper)
 if echo "$HEADERS_PRO" | jq -e --arg t "$LICENSE_TOKEN" '."X-License-Token" == $t' >/dev/null 2>&1; then
-  pass "Pro/env: headersHelper forwards X-License-Token (claude#56 fixed)"
+  pass "Pro/env: headersHelper forwards X-License-Token"
 else
-  xfail "Pro/env: headersHelper drops X-License-Token (claude#56). got: $HEADERS_PRO"
+  fail "Pro/env: headersHelper dropped X-License-Token. got: $HEADERS_PRO"
 fi
 
 # ---------------------------------------------------------------------------
@@ -290,6 +319,15 @@ if [ "$LIC_COUNT" -ge 1 ] && [ "$LIC_COUNT" -eq "$TOTAL_COUNT" ]; then
 else
   fail "Pro/file: $LIC_COUNT of $TOTAL_COUNT captured requests carried X-License-Token (expected all)"
 fi
+
+# ADR-050 §4: X-Axonflow-Client ships on EVERY request, including Pro/file.
+CLIENT_COUNT=$(captured_with_client_header)
+if [ "$CLIENT_COUNT" -eq "$TOTAL_COUNT" ]; then
+  pass "Pro/file: ALL $TOTAL_COUNT captured request(s) carry X-Axonflow-Client"
+else
+  fail "Pro/file: $CLIENT_COUNT of $TOTAL_COUNT carried X-Axonflow-Client (expected all)"
+fi
+
 TOKEN_OBSERVED=$(jq -s -r '.[0].headers["x-license-token"] // empty' "$CAPTURE_FILE")
 [ "$TOKEN_OBSERVED" = "$TOKEN_VALUE" ] && pass "Pro/file: captured token value matches license-token.json .token" \
   || fail "Pro/file: captured token '$TOKEN_OBSERVED' != file '$TOKEN_VALUE'"
