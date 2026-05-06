@@ -204,12 +204,12 @@ Plugin Pro extends the Free baseline (3-day audit retention, 200 governed events
 
 To activate Pro on an installed plugin:
 
-1. Run `/axonflow-status` to find your `tenant_id` (next section). Copy the `cs_<uuid>` value.
-2. At [www.getaxonflow.com/pricing](https://www.getaxonflow.com/pricing/), click **Buy Plugin Pro — $9.99**. At Stripe Checkout, paste your `tenant_id` into the **AxonFlow tenant ID** custom field so the issuer knows which tenant to bind the license to.
-3. After checkout, you'll receive an `AXON-...` license token by email. Activate it on this plugin install via the `/axonflow-login --token <your-token>` slash command, or by setting `AXONFLOW_LICENSE_TOKEN=<your-token>` in the environment Claude Code runs in.
-4. Reload Claude Code. The next governed call uses Pro-tier limits automatically.
+1. **Find your tenant ID.** Run `/axonflow-status` from any Claude Code session. The output includes a `tenant_id=cs_<uuid>` line — that's the value Stripe Checkout needs to bind the license to your tenant. Copy it.
+2. **Buy at the pricing page.** Visit [www.getaxonflow.com/pricing](https://www.getaxonflow.com/pricing/) and click **Buy Plugin Pro — $9.99**. At Stripe Checkout, paste your `tenant_id` into the **AxonFlow tenant ID** custom field.
+3. **Install the issued license token.** After checkout you'll receive an `AXON-...` license token by email. Activate it via `/axonflow-login <your-AXON-token>` (the slash command's argument is the token itself), or by setting `AXONFLOW_LICENSE_TOKEN=<your-AXON-token>` in the environment Claude Code runs in.
+4. **Reload Claude Code.** The next governed call uses Pro-tier limits automatically. The plugin's status canary appends `Pro tier active` so you can verify at a glance.
 
-If you lose the token (laptop reinstall, never archived the email), use `/axonflow-recover <your-email>` followed by `/axonflow-recover-verify <token>` to issue a fresh one against the same email.
+If you lose the token (laptop reinstall, never archived the email), use `/axonflow-recover <your-email>` to request a magic link, then `/axonflow-recover-verify <recovery-token>` to mint fresh credentials against the same email.
 
 ### Check status
 
