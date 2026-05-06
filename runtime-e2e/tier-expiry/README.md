@@ -10,7 +10,7 @@ the configured Pro license token's JWT `exp` claim:
 |----------------|-------------------------------------------------------------------------------|
 | Free           | `tier=Free (no Pro license configured)`                                       |
 | Pro active     | `tier=Pro (expires YYYY-MM-DD, N days remaining)`                             |
-| Pro expired    | `tier=Free (Pro expired YYYY-MM-DD — visit https://www.getaxonflow.com/pricing/ to renew)` |
+| Pro expired    | `tier=Free (Pro expired YYYY-MM-DD — visit https://getaxonflow.com/pricing/ to renew)` |
 
 Plus security guarantees:
 - Full bearer token is NEVER printed; only the last 4 chars in the

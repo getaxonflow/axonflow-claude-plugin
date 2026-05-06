@@ -22,7 +22,7 @@ every governed request.
   status output's `tier=` line parses the JWT `exp` claim from the
   configured Pro license token and renders one of three shapes: `Pro
   (expires YYYY-MM-DD, N days remaining)` when active, `Free (Pro
-  expired YYYY-MM-DD — visit https://www.getaxonflow.com/pricing/ to renew)`
+  expired YYYY-MM-DD — visit https://getaxonflow.com/pricing/ to renew)`
   when the token is on disk but its `exp` has passed (plugin will not
   forward an expired token), or `Free (no Pro license configured)`
   when no token is loaded. Lets users see their renewal date without
@@ -37,7 +37,7 @@ every governed request.
   `$AXONFLOW_CONFIG_DIR/try-registration.json` when set), current tier
   (`Free` vs `Pro`), the redacted license-token preview
   (`set (AXON-...XXXX)`), and — for Free-tier users — the upgrade URL
-  (`AXONFLOW_UPGRADE_URL` env or `https://www.getaxonflow.com/pricing/`). The
+  (`AXONFLOW_UPGRADE_URL` env or `https://getaxonflow.com/pricing/`). The
   `tenant_id` line is the value buyers paste into the Stripe checkout
   custom field when upgrading to AxonFlow Pro. Token output is always
   truncated to the last 4 characters — the full bearer credential is

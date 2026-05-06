@@ -156,7 +156,7 @@ TIER_LINE=""
 PRO_EXPIRED_FLAG=0
 TIER_KIND="free"  # free | pro | pro-expired (for license_token line below)
 TOKEN_DISPLAY="unset"
-UPGRADE_URL="${AXONFLOW_UPGRADE_URL:-https://www.getaxonflow.com/pricing/}"
+UPGRADE_URL="${AXONFLOW_UPGRADE_URL:-https://getaxonflow.com/pricing/}"
 
 if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
   # Always compute redacted preview first — it shows up in license_token=

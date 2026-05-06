@@ -200,12 +200,12 @@ If the canary says `mode=community-saas` after you ran Step 1, the plugin is sti
 
 ### Activate Pro tier
 
-Plugin Pro extends the Free baseline (3-day audit retention, 200 governed events / day) to **30-day retention** and **1,000 events / day** for a 90-day window. One-time **$9.99 USD** payment, no auto-renewal, 14-day no-questions refund. See [www.getaxonflow.com/pricing](https://www.getaxonflow.com/pricing/) for the full breakdown and the Stripe buy button.
+Plugin Pro extends the Free baseline (3-day audit retention, 200 governed events / day) to **30-day retention** and **1,000 events / day** for a 90-day window. One-time **$9.99 USD** payment, no auto-renewal, 14-day no-questions refund. See [getaxonflow.com/pricing](https://getaxonflow.com/pricing/) for the full breakdown and the Stripe buy button.
 
 To activate Pro on an installed plugin:
 
 1. **Find your tenant ID.** Run `/axonflow-status` from any Claude Code session. The output includes a `tenant_id=cs_<uuid>` line — that's the value Stripe Checkout needs to bind the license to your tenant. Copy it.
-2. **Buy at the pricing page.** Visit [www.getaxonflow.com/pricing](https://www.getaxonflow.com/pricing/) and click **Buy Plugin Pro — $9.99**. At Stripe Checkout, paste your `tenant_id` into the **AxonFlow tenant ID** custom field.
+2. **Buy at the pricing page.** Visit [getaxonflow.com/pricing](https://getaxonflow.com/pricing/) and click **Buy Plugin Pro — $9.99**. At Stripe Checkout, paste your `tenant_id` into the **AxonFlow tenant ID** custom field.
 3. **Install the issued license token.** After checkout you'll receive an `AXON-...` license token by email. Activate it via `/axonflow-login <your-AXON-token>` (the slash command's argument is the token itself), or by setting `AXONFLOW_LICENSE_TOKEN=<your-AXON-token>` in the environment Claude Code runs in.
 4. **Reload Claude Code.** The next governed call uses Pro-tier limits automatically. The plugin's status canary appends `Pro tier active` so you can verify at a glance.
 
@@ -220,7 +220,7 @@ OK  endpoint=https://try.getaxonflow.com
 OK  tenant_id=cs_a1b2c3d4-...
 OK  tier=Free
 OK  license_token=unset
-OK  upgrade_url=https://www.getaxonflow.com/pricing/
+OK  upgrade_url=https://getaxonflow.com/pricing/
     Paste your tenant_id above into the 'AxonFlow tenant ID' custom field at checkout.
 ```
 
