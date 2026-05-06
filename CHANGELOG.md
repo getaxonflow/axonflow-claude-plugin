@@ -76,6 +76,7 @@ every governed request.
 
 ### Fixed
 
+- **Upgrade-pointer URL aligned with the canonical pricing page.** `AXONFLOW_UPGRADE_URL` default (the URL surfaced by `/axonflow-status` and `scripts/status.sh` to free-tier users, plus embedded in the `tier=Free (Pro expired ... — visit ... to renew)` line) is now `https://getaxonflow.com/pricing/`. The previous default `https://getaxonflow.com/pro` returned 404 — that page was referenced in PRDs but never built. The pricing page already resolves and carries the Plugin Pro $9.99 tier card with the Stripe buy button, so plugin status output now points free-tier users at a working URL. Override via `AXONFLOW_UPGRADE_URL` env var if needed. Same fix landed in companion plugin releases (openclaw-plugin v2.2.0, cursor-plugin v1.2.0, codex-plugin v1.2.0).
 - **`/axonflow-recover-verify` error output**: when the platform returned
   a 4xx with the standard error envelope `{"error":{"code":N,"message":"..."}}`,
   the script previously echoed the whole nested object as JSON instead
