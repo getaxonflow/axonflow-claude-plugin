@@ -15,7 +15,7 @@ $CLAUDE_PLUGIN_ROOT/scripts/status.sh
 The helper resolves the same way the runtime hooks do — `AXONFLOW_ENDPOINT` if set, otherwise the Community SaaS at `https://try.getaxonflow.com` — and reads `~/.config/axonflow/try-registration.json` (or `$AXONFLOW_CONFIG_DIR/try-registration.json` when set) for the `tenant_id`. Tier is computed from whether `AXONFLOW_LICENSE_TOKEN` env var or `~/.config/axonflow/license-token.json` resolves to a valid `AXON-`-prefixed token AND its JWT `exp` claim is in the future. Three tier-line shapes are possible:
 
 - `tier=Pro (expires 2026-08-03, 90 days remaining)` — paid Pro tier active.
-- `tier=Free (Pro expired 2026-02-04 — visit https://getaxonflow.com/pro to renew)` — token configured but its `exp` is in the past; plugin will not forward it. User must renew + re-run `/axonflow-login --token <new>`.
+- `tier=Free (Pro expired 2026-02-04 — visit https://getaxonflow.com/pricing/ to renew)` — token configured but its `exp` is in the past; plugin will not forward it. User must renew + re-run `/axonflow-login --token <new>`.
 - `tier=Free (no Pro license configured)` — no token loaded.
 
 Output is line-oriented (`OK  field=value`-style), so render it back to the user verbatim, then add:
