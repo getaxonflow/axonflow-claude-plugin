@@ -2,7 +2,21 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-05-06 — V1 paid Pro tier wire-up + X-Axonflow-Client header
+
+Companion plugin release to platform v7.7.0. Surfaces the V1 SaaS Plugin
+Pro tier — `/axonflow-login` to paste the license token, `/axonflow-status`
+to see tier + expiry, plus the agent-side scope-validation header on
+every governed request.
+
 ### Added
+
+- **`X-Axonflow-Client: claude-code/<version>` header** on every governed
+  agent request. Set automatically by the hook runtime; not configurable.
+  Agents at v7.7.0+ derive request scope from this header and reject
+  cross-quadrant token misuse (e.g. a SaaS Plugin Pro token paired with
+  an SDK request) at the validator boundary. Older agents (pre-v7.7.0)
+  ignore the header and continue to work unchanged.
 
 - **`/axonflow-status` tier line now surfaces Pro license expiry.** The
   status output's `tier=` line parses the JWT `exp` claim from the
