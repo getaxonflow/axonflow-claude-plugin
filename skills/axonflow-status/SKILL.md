@@ -6,7 +6,7 @@ description: Show AxonFlow plugin status — tenant_id (needed for Stripe Pro up
 Use this skill when the user asks any of:
 
 - "What is my AxonFlow tenant_id?" — needed to paste into the custom field at
-  Stripe Checkout (`https://getaxonflow.com/pro`) when buying Pro.
+  Stripe Checkout (`https://www.getaxonflow.com/pricing/`) when buying Pro.
 - "Am I on Pro or Free tier?"
 - "When does my Pro license expire?" / "How many days do I have left?"
 - "Is my Pro license token loaded?"
@@ -34,7 +34,7 @@ user where they stand:
 - `tier=Pro (expires 2026-08-03 — UNKNOWN remaining; could not parse token)`
   — token configured but exp claim could not be extracted (treat as Pro for
   display; the platform is the source of truth for validity).
-- `tier=Free (Pro expired 2026-02-04 — visit https://getaxonflow.com/pro to renew)`
+- `tier=Free (Pro expired 2026-02-04 — visit https://www.getaxonflow.com/pricing/ to renew)`
   — token still configured but its `exp` is in the past. The plugin will
   not forward it on governed requests; user must renew.
 - `tier=Free (no Pro license configured)` — no token has ever been loaded.

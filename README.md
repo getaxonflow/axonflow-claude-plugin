@@ -198,6 +198,19 @@ Every hook invocation logs a one-line canary on stderr confirming the active mod
 
 If the canary says `mode=community-saas` after you ran Step 1, the plugin is still hitting `try.getaxonflow.com` because Step 3 was skipped or `AXONFLOW_ENDPOINT` is unset. Fix Step 3 and reload.
 
+### Activate Pro tier
+
+Plugin Pro extends the Free baseline (3-day audit retention, 200 governed events / day) to **30-day retention** and **1,000 events / day** for a 90-day window. One-time **$9.99 USD** payment, no auto-renewal, 14-day no-questions refund. See [www.getaxonflow.com/pricing](https://www.getaxonflow.com/pricing/) for the full breakdown and the Stripe buy button.
+
+To activate Pro on an installed plugin:
+
+1. Run `/axonflow-status` to find your `tenant_id` (next section). Copy the `cs_<uuid>` value.
+2. At [www.getaxonflow.com/pricing](https://www.getaxonflow.com/pricing/), click **Buy Plugin Pro — $9.99**. At Stripe Checkout, paste your `tenant_id` into the **AxonFlow tenant ID** custom field so the issuer knows which tenant to bind the license to.
+3. After checkout, you'll receive an `AXON-...` license token by email. Activate it on this plugin install via the `/axonflow-login --token <your-token>` slash command, or by setting `AXONFLOW_LICENSE_TOKEN=<your-token>` in the environment Claude Code runs in.
+4. Reload Claude Code. The next governed call uses Pro-tier limits automatically.
+
+If you lose the token (laptop reinstall, never archived the email), use `/axonflow-recover <your-email>` followed by `/axonflow-recover-verify <token>` to issue a fresh one against the same email.
+
 ### Check status
 
 Run `/axonflow-status` from any Claude Code session to see your `tenant_id`, the resolved AxonFlow endpoint, and current tier (`Free` vs `Pro`):
@@ -207,7 +220,7 @@ OK  endpoint=https://try.getaxonflow.com
 OK  tenant_id=cs_a1b2c3d4-...
 OK  tier=Free
 OK  license_token=unset
-OK  upgrade_url=https://getaxonflow.com/pro
+OK  upgrade_url=https://www.getaxonflow.com/pricing/
     Paste your tenant_id above into the 'AxonFlow tenant ID' custom field at checkout.
 ```
 
