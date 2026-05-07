@@ -68,6 +68,12 @@ resolve_license_token
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/client-header.sh"
 
+# V1 Plugin Pro upgrade-prompt envelope handling (umbrella
+# axonflow-enterprise#1958). Provides axonflow_throttle_active +
+# axonflow_handle_envelope_response. See scripts/upgrade-prompt.sh.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/upgrade-prompt.sh"
+
 # Build auth header array safely (avoids word-splitting)
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then
@@ -166,12 +172,30 @@ if [ -z "$STATEMENT" ] || [ "$STATEMENT" = "null" ] || [ "$STATEMENT" = "{}" ]; 
   exit 0
 fi
 
+# V1 Plugin Pro back-off: when a recent governed call returned a 429/403
+# envelope, the throttle-until stamp suppresses outbound traffic until the
+# envelope's resets_at deadline. Fall open immediately so the operator's
+# tool calls aren't held up while we wait out the cap (the upgrade prompt
+# was already surfaced when the throttle landed).
+if axonflow_throttle_active; then
+  exit 0
+fi
+
 # Call AxonFlow check_policy via MCP server.
 #
 # Issue #1545 Direction 3: fail OPEN on any network-level failure (timeout,
 # DNS failure, connection refused, 5xx). Only auth/config errors reported
 # by AxonFlow fail closed (see the JSONRPC_ERROR handling below).
-RESPONSE=$(curl -sS --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST "${ENDPOINT}/api/v1/mcp-server" \
+#
+# V1 Plugin Pro: capture HTTP status + headers + body separately so the
+# envelope handler can detect 429 / 403 and stamp the throttle deadline
+# before we fall through to the JSON-RPC parser.
+PRECHECK_BODY=$(mktemp)
+PRECHECK_HEADERS=$(mktemp)
+trap 'rm -f "$PRECHECK_BODY" "$PRECHECK_HEADERS"' EXIT
+HTTP_CODE=$(curl -sS --max-time "$REQUEST_TIMEOUT_SECONDS" \
+  -D "$PRECHECK_HEADERS" -o "$PRECHECK_BODY" -w '%{http_code}' \
+  -X POST "${ENDPOINT}/api/v1/mcp-server" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   "${AUTH_HEADER[@]}" \
@@ -195,7 +219,20 @@ CURL_EXIT=$?
 
 # Any curl-level failure — timeout, DNS failure, connection refused, TCP
 # reset — fails open.
-if [ "$CURL_EXIT" -ne 0 ] || [ -z "$RESPONSE" ]; then
+if [ "$CURL_EXIT" -ne 0 ]; then
+  exit 0
+fi
+
+# Detect the V1 Plugin Pro envelope on 429 / 403. When present, the helper
+# stamps throttle-until + emits the upgrade prompt to stderr, and we fall
+# open (Free-tier without policy enforcement is the natural degraded state
+# until the cap clears).
+if axonflow_handle_envelope_response "$HTTP_CODE" "$PRECHECK_BODY" "$PRECHECK_HEADERS"; then
+  exit 0
+fi
+
+RESPONSE=$(cat "$PRECHECK_BODY")
+if [ -z "$RESPONSE" ]; then
   exit 0
 fi
 

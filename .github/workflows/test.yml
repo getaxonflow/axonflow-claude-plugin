@@ -29,11 +29,17 @@ jobs:
         run: |
           bash -n scripts/pre-tool-check.sh
           bash -n scripts/post-tool-audit.sh
+          bash -n scripts/upgrade-prompt.sh
 
       - name: Run hook regression tests (mock server)
         run: |
           chmod +x tests/test-hooks.sh scripts/*.sh
           ./tests/test-hooks.sh
+
+      - name: Run upgrade-prompt envelope-handler unit tests
+        run: |
+          chmod +x tests/test-upgrade-prompt.sh
+          ./tests/test-upgrade-prompt.sh
 
       - name: Validate plugin structure
         run: |
