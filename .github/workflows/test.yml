@@ -41,6 +41,11 @@ jobs:
           chmod +x tests/test-upgrade-prompt.sh
           ./tests/test-upgrade-prompt.sh
 
+      - name: Run skill-content assertion (axonflow-status prefers local)
+        run: |
+          chmod +x tests/test-skill-status-prefers-local.sh
+          ./tests/test-skill-status-prefers-local.sh
+
       - name: Validate plugin structure
         run: |
           # Required files must exist

@@ -15,25 +15,30 @@ Use this skill when the user asks any of:
 
 ## What to do
 
-1. **Prefer the MCP tool when available.** The AxonFlow agent exposes
-   `axonflow_get_tenant_id` via the `axonflow` MCP server (auto-discovered
-   when the `mcp__axonflow__*` toolset is allowed). If that tool is in the
-   available toolset, call it first — it returns `tenant_id`, the
-   caller's tier as resolved server-side from the credentials, and the
-   canonical `upgrade_url` + `buy_url`. The MCP path is auth-context-aware
-   and avoids spawning a shell.
-2. **Fall back to the script** when the MCP tool isn't available (older
-   agents, or the MCP server isn't wired in). Tell the user what you're
-   about to do: "I'll run `scripts/status.sh` in your terminal to print
-   your tenant_id, tier, and Pro license expiry." Then invoke the script
-   via the Bash tool from the plugin install root:
-   `$CLAUDE_PLUGIN_ROOT/scripts/status.sh`
-   Equivalent to invoking the `/axonflow-status` slash command directly.
+1. **Prefer the local script — it answers without an agent round-trip.**
+   `scripts/status.sh` reads `tenant_id` and tier directly from the
+   plugin's persisted state (`~/.config/axonflow/try-registration.json`,
+   the configured license token's JWT `exp` claim). No HTTP call to the
+   agent. Faster, works offline, and works exactly when the user
+   typically asks this question — while debugging the Stripe Checkout
+   flow, when the agent isn't reachable yet, or when they just want a
+   quick read on which tenant they're on. Tell the user: "I'll run
+   `scripts/status.sh` to print your tenant_id, tier, and Pro license
+   expiry locally — no agent round-trip." Invoke via the Bash tool
+   from the plugin install root: `$CLAUDE_PLUGIN_ROOT/scripts/status.sh`
+   (equivalent to the `/axonflow-status` slash command).
+2. **Use the MCP tool only when the user explicitly wants server-truth.**
+   The `axonflow_get_tenant_id` MCP tool returns the same shape but
+   resolved server-side, which catches edge cases the local script
+   can't: a Pro license revoked by the platform, clock skew on JWT
+   `exp`, or a server-side tier override. Use it when the user asks
+   something like "is my Pro license still valid on the server" or
+   "the agent is rejecting me, what does the agent see for me?". In all
+   other cases the local script is sufficient and cheaper.
 3. Surface the `tenant_id`, `tier`, and (when present) `expires` lines back
    to the user. If they asked about upgrading, point them at the
-   `upgrade_url` returned by the tool / printed by the script, and remind
-   them they need to paste the `tenant_id` into the Stripe Checkout
-   custom field.
+   `upgrade_url` printed by the script, and remind them they need to
+   paste the `tenant_id` into the Stripe Checkout custom field.
 
 ## Related agent-callable tools
 

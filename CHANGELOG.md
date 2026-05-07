@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`axonflow-status` skill — prefer the local `scripts/status.sh` over
+  the MCP tool** for tenant_id / tier queries. The local script reads
+  state directly (`~/.config/axonflow/try-registration.json`, the
+  configured license token's JWT `exp` claim) and answers without an
+  agent round-trip. Faster, works offline, and works exactly when the
+  user typically asks ("the agent isn't reachable, what's my tenant
+  ID for Stripe Checkout?"). The MCP tool stays as a documented
+  fallback for the rare cases where server-truth matters (revocation,
+  clock skew, server-side overrides). Closes
+  axonflow-enterprise#1962 follow-up — the original 1.3.0 SKILL.md
+  preferred the MCP path; this corrects it.
+
+### Internal
+
+- `tests/test-skill-status-prefers-local.sh` — content assertion that
+  the skill file's first numbered step references the local script
+  path before any MCP tool reference. Wired into
+  `.github/workflows/test.yml` so a future SKILL.md edit can't silently
+  re-introduce the round-trip preference.
+
 ## [1.3.0] - 2026-05-07 — V1 Plugin Pro upgrade-prompt envelope + 5 new MCP tools surfaced
 
 Companion plugin release to platform v7.7.0 + agent PRs #1966 / #1968. Surfaces
