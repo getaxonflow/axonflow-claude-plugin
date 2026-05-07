@@ -58,10 +58,11 @@ call_mcp() {
 
 errors=0
 
-# 1) tools/list — verify all 5 are advertised by the MCP server
-echo "--- 1/6 tools/list ---"
+# 1) tools/list — verify W2 governance tools + V1.1 list_recent_decisions
+# are advertised by the MCP server.
+echo "--- 1/7 tools/list ---"
 LIST_RESP=$(call_mcp 2 '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
-for tool in search_audit_events explain_decision create_override delete_override list_overrides; do
+for tool in search_audit_events explain_decision list_recent_decisions create_override delete_override list_overrides; do
   if echo "$LIST_RESP" | grep -q "\"name\":\"$tool\""; then
     echo "PASS: tools/list advertises $tool"
   else
@@ -113,7 +114,7 @@ else
 fi
 
 # 6) delete_override — non-existent id
-echo "--- 6/6 tools/call delete_override (nonexistent id) ---"
+echo "--- 6/7 tools/call delete_override (nonexistent id) ---"
 RESP=$(call_mcp 7 '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"delete_override","arguments":{"override_id":"runtime-e2e-no-such-override"}}}')
 if echo "$RESP" | grep -q '"jsonrpc"'; then
   echo "PASS: delete_override dispatched"
@@ -122,8 +123,23 @@ else
   errors=$((errors + 1))
 fi
 
+# 7) list_recent_decisions (V1.1 #1982) — assert the over-cap path returns
+# the wrapped V1 envelope. limit=10 over Community max page=5 must come
+# back with upgrade_required + limit_type=decision_list_size + buy_url.
+# This locks in feedback_429_no_upgrade_hint_is_conversion_gap.md at the
+# wire level: the cap-hit cannot be silently swallowed.
+echo "--- 7/7 tools/call list_recent_decisions (over-cap envelope) ---"
+RESP=$(call_mcp 8 '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"list_recent_decisions","arguments":{"limit":10}}}')
+RESP_TEXT=$(echo "$RESP" | jq -r '.result.content[0].text // empty')
+if echo "$RESP_TEXT" | jq -e '.upgrade_required==true and .envelope.limit_type=="decision_list_size" and .envelope.upgrade.buy_url != null' >/dev/null 2>&1; then
+  echo "PASS: list_recent_decisions over-cap returned wrapped V1 envelope"
+else
+  echo "FAIL: list_recent_decisions over-cap envelope shape wrong: $RESP_TEXT"
+  errors=$((errors + 1))
+fi
+
 if [ "$errors" -gt 0 ]; then
   echo "FAIL: $errors scenario(s) failed"
   exit 1
 fi
-echo "PASS: runtime-mcp-tools — all 5 tools advertised + dispatch correctly"
+echo "PASS: runtime-mcp-tools — W2 + V1.1 tools advertised + dispatch correctly"
