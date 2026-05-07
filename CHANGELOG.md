@@ -2,34 +2,11 @@
 
 ## [Unreleased]
 
-### Changed
-
-- **`axonflow-status` skill — prefer the local `scripts/status.sh` over
-  the MCP tool** for tenant_id / tier queries. The local script reads
-  state directly (`~/.config/axonflow/try-registration.json`, the
-  configured license token's JWT `exp` claim) and answers without an
-  agent round-trip. Faster, works offline, and works exactly when the
-  user typically asks ("the agent isn't reachable, what's my tenant
-  ID for Stripe Checkout?"). The MCP tool stays as a documented
-  fallback for the rare cases where server-truth matters (revocation,
-  clock skew, server-side overrides). Closes
-  axonflow-enterprise#1962 follow-up — the original 1.3.0 SKILL.md
-  preferred the MCP path; this corrects it.
-
-### Internal
-
-- `tests/test-skill-status-prefers-local.sh` — content assertion that
-  the skill file's first numbered step references the local script
-  path before any MCP tool reference. Wired into
-  `.github/workflows/test.yml` so a future SKILL.md edit can't silently
-  re-introduce the round-trip preference.
-
 ## [1.3.0] - 2026-05-07 — V1 Plugin Pro upgrade-prompt envelope + 5 new MCP tools surfaced
 
-Companion plugin release to platform v7.7.0 + agent PRs #1966 / #1968. Surfaces
-the V1 Plugin Pro structured upgrade envelope to the operator and documents
-the 5 new agent-callable MCP tools (closing umbrella
-axonflow-enterprise#1958 cross-plugin surfacing tracker #1955).
+Companion plugin release to AxonFlow agent v7.7.0. Surfaces the V1
+Plugin Pro structured upgrade envelope to the operator on Community
+SaaS rate-limit hits and documents 5 new agent-callable MCP tools.
 
 ### Added
 
@@ -66,22 +43,34 @@ axonflow-enterprise#1958 cross-plugin surfacing tracker #1955).
   unlimited HITL approvals, and the LLM cost pre-flight feature added.
 - **README MCP-tools section** renumbered from "10 MCP tools" to "15 MCP
   tools" to include the new V1 Pro tier-identity / tier-capability tools.
+- **`axonflow-status` skill — prefer the local `scripts/status.sh` over
+  the MCP tool** for tenant_id / tier queries. The local script reads
+  state directly (`~/.config/axonflow/try-registration.json`, the
+  configured license token's JWT `exp` claim) and answers without an
+  agent round-trip. Faster, works offline, and works exactly when the
+  user typically asks ("the agent isn't reachable, what's my tenant
+  ID for Stripe Checkout?"). The MCP tool stays as a documented
+  fallback for the rare cases where server-truth matters (revocation,
+  clock skew, server-side overrides).
 
 ### Internal
 
-- Added `runtime-e2e/v1_pro_envelope_surface/` per HARD RULE #0 —
-  registers a synthetic Free-tier tenant via the canonical `db_helpers.sh`
-  ECS-exec pattern, seeds `community_saas_daily_usage = 200` to land at
-  the cap, captures the live V1 envelope from `/api/v1/audit/tool-call`,
-  and drives the plugin's real `axonflow_handle_envelope_response` against
-  the captured wire bytes. The hook itself currently calls
-  `/api/v1/mcp-server` which authenticates via
-  `authenticateMCPServerRequest` and does not yet route through the
-  `apiAuthMiddleware` daily-cap path that emits the V1 envelope —
-  that's an S1-side follow-up tracked in
-  `axonflow-enterprise#1958`'s S1 follow-ups; the plugin code is ready
-  for it (the helper handles both bare and JSON-RPC-wrapped envelope
-  shapes).
+- `runtime-e2e/v1_pro_envelope_surface/` — drives the plugin's real
+  `axonflow_handle_envelope_response` against a live V1 envelope
+  captured from a Free-tier tenant on `try.getaxonflow.com` past the
+  200/day cap. The plugin handler is ready for both bare and
+  JSON-RPC-wrapped envelope shapes (the latter is what the new V1 Pro
+  MCP tools deliver); a current limitation is that the plugin's hook
+  path calls `/api/v1/mcp-server` which doesn't yet route the
+  daily-cap envelope through the same code path as
+  `/api/v1/audit/tool-call` — pending an agent-side fix in a future
+  v7.7.x release. The plugin code emits the same operator nudge as
+  soon as the agent-side wiring lands.
+- `tests/test-skill-status-prefers-local.sh` — content assertion that
+  the `axonflow-status` SKILL.md's first numbered step references the
+  local script path before any MCP tool reference. Wired into
+  `.github/workflows/test.yml` so a future SKILL.md edit can't silently
+  re-introduce the round-trip preference.
 
 ## [1.2.0] - 2026-05-06 — V1 paid Pro tier wire-up + X-Axonflow-Client header
 
