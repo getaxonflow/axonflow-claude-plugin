@@ -431,6 +431,10 @@ Anonymous heartbeat at most once every 7 days per machine: plugin version, OS, a
 
 Opt out: set `AXONFLOW_TELEMETRY=off` in the environment Claude Code runs in.
 
+### Scope of `AXONFLOW_TELEMETRY=off`
+
+`AXONFLOW_TELEMETRY=off` disables the anonymous heartbeat described above. On **self-hosted** and **in-VPC** deployments, that heartbeat is the only data the plugin sends to AxonFlow, so setting `=off` means we receive nothing. On **Community SaaS** (`try.getaxonflow.com`) the hosted service also processes operational data — registrations, audit logs, policy enforcement records, workflow state, plan data, and request-header metadata aggregated for usage analytics — as part of running the platform; that operational data flow is governed by the [Privacy Policy](https://getaxonflow.com/privacy/), not by `AXONFLOW_TELEMETRY`.
+
 `DO_NOT_TRACK` is **not** honored as an opt-out for AxonFlow telemetry. It is commonly inherited from host tools and developer environments — and in Claude Code specifically, the CLI injects `DO_NOT_TRACK=1` into every hook subprocess regardless of user intent. That makes it an unreliable expression of user intent, so AxonFlow telemetry is controlled exclusively by `AXONFLOW_TELEMETRY=off`.
 
 Guarded by a stamp file at `$HOME/.cache/axonflow/claude-code-plugin-telemetry-sent` (delete to re-send). Details: [docs.getaxonflow.com/docs/telemetry](https://docs.getaxonflow.com/docs/telemetry/).
