@@ -41,13 +41,8 @@ run_claude_with_tool() {
   local output_file="$3"
 
   export AXONFLOW_ENDPOINT
-  # If the caller already set AXONFLOW_AUTH (e.g. tests targeting a real
-  # tenant on try.getaxonflow.com), respect it. Otherwise default to the
-  # local-stack demo-client/demo-secret credentials.
-  if [ -z "${AXONFLOW_AUTH:-}" ]; then
-    AXONFLOW_AUTH="$(printf '%s:%s' "$AXONFLOW_CLIENT_ID" "$AXONFLOW_CLIENT_SECRET" | base64)"
-  fi
   export AXONFLOW_AUTH
+  AXONFLOW_AUTH="$(printf '%s:%s' "$AXONFLOW_CLIENT_ID" "$AXONFLOW_CLIENT_SECRET" | base64)"
 
   local plugin_dir
   plugin_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

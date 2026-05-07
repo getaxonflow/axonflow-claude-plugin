@@ -38,6 +38,7 @@
     "price_usd": 9.99,
     "renewal": "one-time (re-purchase to extend; no auto-renewal)"
   },
+  "success": true,
   "tone": "Free validates the workflow. Pro removes the caps when AxonFlow becomes part of your real workflow.",
   "upgrade_url": "https://getaxonflow.com/pricing/"
 }

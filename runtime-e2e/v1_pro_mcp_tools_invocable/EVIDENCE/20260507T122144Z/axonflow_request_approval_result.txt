@@ -1,8 +1,0 @@
-{
-  "approval_id": "6",
-  "message": "Approval request created. The user must approve via the AxonFlow customer portal before the operation can proceed.",
-  "original_query": "runtime-e2e probe",
-  "request_type": "shell_command",
-  "severity": "low",
-  "status": "pending"
-}

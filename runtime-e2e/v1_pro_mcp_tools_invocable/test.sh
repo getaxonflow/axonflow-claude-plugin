@@ -31,6 +31,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # shellcheck source=../_lib/claude-runtime.sh
+# Sourced only for runtime_e2e_skip_if_unavailable. The
+# run_claude_with_tool helper is intentionally bypassed below — see
+# the comment above run_claude_against_real_tenant.
 source "$PLUGIN_DIR/runtime-e2e/_lib/claude-runtime.sh"
 
 UTC_TS=$(date -u +%Y%m%dT%H%M%SZ)
@@ -135,6 +138,31 @@ fi
 # bootstrap auto-runs because we set AXONFLOW_ENDPOINT explicitly.
 export AXONFLOW_AUTH=$(printf '%s:%s' "$TENANT" "$SECRET" | base64 | tr -d '\n')
 
+# Inline claude invocation (replaces the runtime-e2e/_lib helper).
+# `runtime-e2e/_lib/claude-runtime.sh:run_claude_with_tool` always
+# clobbers AXONFLOW_AUTH with the local-stack demo-client/demo-secret
+# default — that's intentional for tests targeting a local docker
+# stack. This test targets a real tenant on try.getaxonflow.com so
+# we inline the same launch shape (--plugin-dir, --print,
+# --output-format stream-json, --allowedTools mcp__axonflow__*,
+# --dangerously-skip-permissions) here and skip the helper.
+run_claude_against_real_tenant() {
+  local prompt="$1"
+  local output_file="$2"
+  local tmpdir
+  tmpdir="$(mktemp -d -t axonflow-claude-e2e-real.XXXXXX)"
+  ( cd "$tmpdir" && claude \
+    --plugin-dir "$PLUGIN_DIR" \
+    --print \
+    --output-format stream-json \
+    --include-partial-messages \
+    --verbose \
+    --allowedTools "mcp__axonflow__*" \
+    --dangerously-skip-permissions \
+    "$prompt" 2>&1 ) > "$output_file" || true
+  rm -rf "$tmpdir"
+}
+
 # ---------------------------------------------------------------------------
 # Per-tool driver. Each iteration:
 #   - assembles a prompt that explicitly asks the AI to invoke ONE
@@ -153,7 +181,7 @@ record_tool_result() {
   local out_file="$EVIDENCE/${tool}.jsonl"
   echo
   echo "================ tool: $tool — expectation: $expectation ================"
-  run_claude_with_tool "" "$prompt" "$out_file"
+  run_claude_against_real_tenant "$prompt" "$out_file"
   echo "  captured $(wc -l <"$out_file") lines to $out_file"
 
   # Claude prefixes plugin MCP tools as `mcp__plugin_<plugin-name>_<server-name>__<tool>`.
@@ -203,8 +231,20 @@ record_tool_result() {
   echo "$body" > "$EVIDENCE/${tool}_result.txt"
   echo "$expectation" > "$EVIDENCE/${tool}_expectation.txt"
 
+  # All 4 success-path tools carry `success: true` (axonflow-enterprise
+  # PR #1989, response-shape ergonomics fix per #1986). Lock that in on
+  # the consumer side so a future server-side regression breaks this
+  # test.
+  assert_success_true() {
+    local _tool="$1" _body="$2"
+    if ! echo "$_body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+      fail "$_tool: result missing 'success: true' (axonflow-enterprise#1989 contract)"
+    fi
+  }
+
   case "$expectation" in
     list_pro_features_ok)
+      assert_success_true "$tool" "$body"
       echo "$body" | grep -qF 'differentiators' || fail "$tool: result missing 'differentiators' field"
       echo "$body" | grep -qF '9.99' || fail "$tool: result missing '9.99' price"
       ;;
@@ -213,12 +253,19 @@ record_tool_result() {
       echo "$body" | grep -qF 'buy.stripe.com/bJe28qbztcdVchjdkw8k800' || fail "$tool: result missing locked V1 buy URL"
       ;;
     request_approval_ok)
+      assert_success_true "$tool" "$body"
+      echo "$body" | grep -qE '"submitted"[[:space:]]*:[[:space:]]*true' || \
+        fail "$tool: result missing 'submitted: true' (axonflow-enterprise#1989 contract)"
       echo "$body" | grep -qE 'approval_id|"id":' || fail "$tool: result missing approval_id"
       ;;
     create_tenant_policy_ok)
+      assert_success_true "$tool" "$body"
+      echo "$body" | grep -qE '"created"[[:space:]]*:[[:space:]]*true' || \
+        fail "$tool: result missing 'created: true' (axonflow-enterprise#1989 contract)"
       echo "$body" | grep -qE 'policy_id' || fail "$tool: result missing policy_id"
       ;;
     get_tenant_id_ok)
+      assert_success_true "$tool" "$body"
       echo "$body" | grep -qF "$TENANT" || fail "$tool: result missing tenant_id ($TENANT)"
       echo "$body" | grep -qF 'getaxonflow.com/pricing' || fail "$tool: result missing upgrade_url"
       ;;
@@ -244,7 +291,7 @@ record_tool_hidden() {
   echo
   echo "================ tool: $tool — expectation: hidden_from_free_tier ================"
   local out_file="$EVIDENCE/${tool}.jsonl"
-  run_claude_with_tool "" \
+  run_claude_against_real_tenant \
     "List the MCP tools you can see whose name contains '${tool}'. Just list them, don't invoke any. Print exactly SMOKE_RESULT followed by a JSON line." \
     "$out_file"
   echo "  captured $(wc -l <"$out_file") lines"
