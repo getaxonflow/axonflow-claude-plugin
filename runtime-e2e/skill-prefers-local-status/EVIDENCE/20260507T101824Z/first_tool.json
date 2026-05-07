@@ -1,0 +1,1 @@
+{"name":"Bash","input":{"command":"$CLAUDE_PLUGIN_ROOT/scripts/status.sh","description":"Run AxonFlow status helper"}}

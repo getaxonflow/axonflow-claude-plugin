@@ -15,9 +15,15 @@
 # output is parsed to confirm:
 #
 #   1. Some tool was invoked (the agent didn't refuse to act).
-#   2. The FIRST tool the agent invoked is the Bash call running
-#      $CLAUDE_PLUGIN_ROOT/scripts/status.sh — NOT the MCP tool
-#      mcp__axonflow__axonflow_get_tenant_id.
+#   2. The FIRST NON-SKILL tool the agent invoked is the Bash call
+#      running $CLAUDE_PLUGIN_ROOT/scripts/status.sh — NOT the MCP tool
+#      mcp__axonflow__axonflow_get_tenant_id. (Skill tool calls are
+#      the agent's mechanism for loading SKILL.md into context; the
+#      next tool is what the skill actually drove. We assert on the
+#      latter.)
+#   3. The MCP tool axonflow_get_tenant_id is NOT invoked at any tool
+#      index BEFORE the local script — the skill's preference must
+#      hold across the entire run, not just at position #1.
 #
 # Skip conditions (graceful):
 #   - claude CLI not on PATH
