@@ -1,0 +1,6 @@
+Skill-prefers-local-status runtime proof — 20260507T101824Z
+AXONFLOW_ENDPOINT=https://try.getaxonflow.com
+First non-Skill tool: {"name":"Bash","input":{"command":"$CLAUDE_PLUGIN_ROOT/scripts/status.sh","description":"Run AxonFlow status helper"}}
+Script @tool#: 2
+MCP get_tenant_id @tool#: (not invoked)
+Result: PASS

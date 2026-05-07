@@ -59,9 +59,13 @@ AXONFLOW_ENDPOINT=http://localhost:8080 \
 Evidence under `runtime-e2e/skill-prefers-local-status/EVIDENCE/<utc-ts>/`:
 
 - `claude_stream.jsonl` — full stream-json captured from the host CLI
-- `first_tool.json` — `{ name, input }` of the first tool the agent invoked
-- `result_text.txt` — the agent's final answer text
-- `summary.txt` — top-line PASS / FAIL line
+- `first_tool.json` — `{ name, input }` of the first non-Skill tool the
+  agent invoked (we skip the `Skill` probe — that's the host CLI's
+  mechanism for loading SKILL.md into context — and assert on the
+  next tool, which is what the skill actually drove)
+- `result_full.jsonl` — full assistant output stream used for the
+  tenant_id-shaped-content assertion
+- `summary.txt` — top-line PASS / FAIL line, plus tool-index breadcrumbs
 
 ## Cross-references
 
