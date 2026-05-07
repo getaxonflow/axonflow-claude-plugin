@@ -46,6 +46,19 @@ resolve_license_token
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/client-header.sh"
 
+# V1 Plugin Pro upgrade-prompt envelope handling (umbrella
+# axonflow-enterprise#1958).
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/upgrade-prompt.sh"
+
+# When a recent governed call landed on a Free-tier cap, the throttle file
+# tells us to stop sending traffic until the deadline. Audit + scan are both
+# best-effort — falling open here is correct (the upgrade prompt was
+# already surfaced when the throttle landed).
+if axonflow_throttle_active; then
+  exit 0
+fi
+
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then
   AUTH_HEADER=(-H "Authorization: Basic $AUTH")
@@ -135,7 +148,12 @@ case "$TOOL_NAME" in
 esac
 
 if [ -n "$OUTPUT_TEXT" ] && [ "$OUTPUT_TEXT" != "null" ]; then
-  SCAN_RESPONSE=$(curl -sS --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST "${ENDPOINT}/api/v1/mcp-server" \
+  SCAN_BODY=$(mktemp)
+  SCAN_HEADERS=$(mktemp)
+  trap 'rm -f "$SCAN_BODY" "$SCAN_HEADERS"' EXIT
+  SCAN_HTTP=$(curl -sS --max-time "$REQUEST_TIMEOUT_SECONDS" \
+    -D "$SCAN_HEADERS" -o "$SCAN_BODY" -w '%{http_code}' \
+    -X POST "${ENDPOINT}/api/v1/mcp-server" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json" \
     "${AUTH_HEADER[@]}" \
@@ -153,7 +171,14 @@ if [ -n "$OUTPUT_TEXT" ] && [ "$OUTPUT_TEXT" != "null" ]; then
             message: $msg
           }
         }
-      }')" 2>/dev/null || echo "")
+      }')" 2>/dev/null) || SCAN_HTTP=""
+
+  # V1 Plugin Pro: stamp throttle + nudge operator on envelope responses.
+  # Caller falls open whether or not the envelope was detected.
+  if axonflow_handle_envelope_response "$SCAN_HTTP" "$SCAN_BODY" "$SCAN_HEADERS"; then
+    exit 0
+  fi
+  SCAN_RESPONSE=$(cat "$SCAN_BODY" 2>/dev/null || echo "")
 
   # If PII was found, add context for Claude
   if [ -n "$SCAN_RESPONSE" ]; then

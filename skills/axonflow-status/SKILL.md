@@ -15,15 +15,45 @@ Use this skill when the user asks any of:
 
 ## What to do
 
-1. Tell the user what you're about to do: "I'll run `scripts/status.sh` in
-   your terminal to print your tenant_id, tier, and Pro license expiry."
-2. Invoke the script via the Bash tool from the plugin install root:
+1. **Prefer the MCP tool when available.** The AxonFlow agent exposes
+   `axonflow_get_tenant_id` via the `axonflow` MCP server (auto-discovered
+   when the `mcp__axonflow__*` toolset is allowed). If that tool is in the
+   available toolset, call it first — it returns `tenant_id`, the
+   caller's tier as resolved server-side from the credentials, and the
+   canonical `upgrade_url` + `buy_url`. The MCP path is auth-context-aware
+   and avoids spawning a shell.
+2. **Fall back to the script** when the MCP tool isn't available (older
+   agents, or the MCP server isn't wired in). Tell the user what you're
+   about to do: "I'll run `scripts/status.sh` in your terminal to print
+   your tenant_id, tier, and Pro license expiry." Then invoke the script
+   via the Bash tool from the plugin install root:
    `$CLAUDE_PLUGIN_ROOT/scripts/status.sh`
    Equivalent to invoking the `/axonflow-status` slash command directly.
 3. Surface the `tenant_id`, `tier`, and (when present) `expires` lines back
    to the user. If they asked about upgrading, point them at the
-   `upgrade_url` printed in the output and remind them they need to paste
-   the `tenant_id` into the Stripe Checkout custom field.
+   `upgrade_url` returned by the tool / printed by the script, and remind
+   them they need to paste the `tenant_id` into the Stripe Checkout
+   custom field.
+
+## Related agent-callable tools
+
+When the AxonFlow MCP server is available the agent can answer related
+questions directly via tool calls without spawning shell scripts:
+
+- `axonflow_get_tenant_id` — tenant identity + tier + upgrade URLs.
+- `axonflow_list_pro_features` — locked V1 Pro feature list (5
+  differentiators + $9.99 / 90 days pricing). Useful when the user asks
+  "what would I get if I upgraded?".
+- `axonflow_request_approval` — file a HITL approval request before a
+  risky operation (Free tier: 1 per rolling 7d; Pro: unlimited).
+- `axonflow_create_tenant_policy` — create a custom tenant policy (Free
+  tier: 2 active max; Pro: unlimited).
+- `axonflow_get_cost_estimate` — pre-flight LLM cost for a multi-step
+  plan. Pro-only — the tool isn't visible to Free callers.
+
+Prefer these tools over equivalent shell scripts when both exist; they
+are auth-context-aware on the server side and don't require local shell
+state.
 
 ## Tier line shape
 
