@@ -198,7 +198,7 @@ Every hook invocation logs a one-line canary on stderr confirming the active mod
 
 If the canary says `mode=community-saas` after you ran Step 1, the plugin is still hitting `try.getaxonflow.com` because Step 3 was skipped or `AXONFLOW_ENDPOINT` is unset. Fix Step 3 and reload.
 
-### Activate Pro tier
+## Activate Pro tier
 
 Plugin Pro extends the Free baseline (3-day audit retention, 200 governed events / day, 2 active custom policies, 1 HITL approval per rolling 7d) to **30-day retention**, **2,000 events / day**, **unlimited active custom policies**, **unlimited HITL approvals**, and adds the **LLM cost pre-flight** tool (estimate token cost for a multi-step plan before it runs). 90-day window, one-time **$9.99 USD** payment, no auto-renewal, 14-day no-questions refund. See [getaxonflow.com/pricing](https://getaxonflow.com/pricing/) for the full breakdown and the Stripe buy button.
 
