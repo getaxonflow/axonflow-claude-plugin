@@ -55,19 +55,22 @@ gate.
 
 Claude CLI prompts per-tool by default. The test bypasses this with
 `--dangerously-skip-permissions` and `--allowedTools "mcp__axonflow__*"`
-on the `claude --print` invocation (see
-`runtime-e2e/_lib/claude-runtime.sh:run_claude_with_tool`). Without
-that, every `tools/call` would block on a permission dialog and the
-test would deadlock.
+on the `claude --print` invocation (see the
+`run_claude_against_real_tenant` function defined inline in
+`test.sh`). Without those flags, every `tools/call` would block on
+a permission dialog and the test would deadlock.
 
-**Don't drop these flags** when iterating on the test or the
-`run_claude_with_tool` helper. If you need to explore tool-permission
-behaviour for a different test, use a separate helper — keep this
-test's automation guarantee. Confirm one trivial tool fires without a
-prompt before sending the full 5-tool prompt: the
-`run_claude_with_tool` helper already covers that path; what fails
-silently is when a future change to the helper drops `--dangerously-skip-permissions`
-and the test starts hanging on the first tool.
+**Don't drop those flags** when iterating on the test. The inline
+runner is the test's single source of truth for the launch shape;
+the shared helper at `runtime-e2e/_lib/claude-runtime.sh:run_claude_with_tool`
+is intentionally bypassed because it always rewrites `AXONFLOW_AUTH`
+to the local-stack `demo-client` default — appropriate for tests
+targeting a local docker stack, wrong for tests targeting a real
+tenant on `try.getaxonflow.com`. Confirm one trivial tool fires
+without a prompt before sending the full 5-tool prompt: what fails
+silently is when a future edit to `run_claude_against_real_tenant`
+drops `--dangerously-skip-permissions` and the test starts hanging
+on the first tool.
 
 ## Pre-conditions
 
