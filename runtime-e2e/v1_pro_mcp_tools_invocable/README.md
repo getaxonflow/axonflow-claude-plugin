@@ -51,6 +51,24 @@ two tests cover the same Pro-only contract from opposite directions:
 the OpenClaw test proves the wire shape; this test proves the visibility
 gate.
 
+## Tool allowlisting
+
+Claude CLI prompts per-tool by default. The test bypasses this with
+`--dangerously-skip-permissions` and `--allowedTools "mcp__axonflow__*"`
+on the `claude --print` invocation (see
+`runtime-e2e/_lib/claude-runtime.sh:run_claude_with_tool`). Without
+that, every `tools/call` would block on a permission dialog and the
+test would deadlock.
+
+**Don't drop these flags** when iterating on the test or the
+`run_claude_with_tool` helper. If you need to explore tool-permission
+behaviour for a different test, use a separate helper — keep this
+test's automation guarantee. Confirm one trivial tool fires without a
+prompt before sending the full 5-tool prompt: the
+`run_claude_with_tool` helper already covers that path; what fails
+silently is when a future change to the helper drops `--dangerously-skip-permissions`
+and the test starts hanging on the first tool.
+
 ## Pre-conditions
 
 The test handles all of these automatically and SKIPs cleanly when
