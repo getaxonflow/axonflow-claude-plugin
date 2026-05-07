@@ -1,0 +1,7 @@
+{
+  "buy_url": "https://buy.stripe.com/bJe28qbztcdVchjdkw8k800",
+  "success": true,
+  "tenant_id": "cs_bfe55bf1-1e64-4264-966c-f162da7b85ae",
+  "tier": "Free",
+  "upgrade_url": "https://getaxonflow.com/pricing/"
+}

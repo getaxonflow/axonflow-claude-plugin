@@ -1,0 +1,12 @@
+{
+  "action": "warn",
+  "connector_type": "claude_code.Bash",
+  "created": true,
+  "enabled": true,
+  "id": "2f170c86-dfa5-4587-bd57-f623f11adc7a",
+  "message": "Successfully created tenant-scoped policy \"runtime-e2e-claude-20260507T143917Z\". It will apply to subsequent governed calls.",
+  "name": "runtime-e2e-claude-20260507T143917Z",
+  "pattern": "axonflow-runtime-e2e-marker",
+  "policy_id": "tenant-cs_bfe55bf1--c8ad8577-e15a-4eb0-967a-047129cce5e6",
+  "success": true
+}
