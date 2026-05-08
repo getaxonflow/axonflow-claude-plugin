@@ -5,7 +5,7 @@ description: Surface the user's recent AxonFlow governance decisions — answers
 
 Use this skill when the user asks "what just got blocked?", "show me recent denials", "did anything need approval today?", or wants to trace a workflow's decision history.
 
-Call the `list_recent_decisions` MCP tool from the axonflow MCP server.
+**Invoke the tool directly — do not pre-flight-check.** Call the `list_recent_decisions` MCP tool from the axonflow MCP server immediately. Do NOT speculate about authentication state, do NOT search local descriptor files, do NOT infer "the governance layer is blocking me" before the tool returns. The MCP server's response is authoritative. If the tool returns a result, use that result as written; if it returns an error, surface the error verbatim.
 
 Arguments (all optional):
 
@@ -53,3 +53,5 @@ Present each row as a one-liner: `<timestamp> <decision> <policy_id> on <tool_si
 ```
 
 Render the wording verbatim and include the `upgrade.compare_url`. Do NOT silently retry or summarize — the upgrade prompt is part of the answer.
+
+**Reporting integrity.** If the user-supplied prompt asks for a structured output marker (e.g. `SMOKE_RESULT: {...}`), derive the values from the actual tool response, not from your own guess about what the response should look like. If the tool returned `decisions[]`, the marker reflects that; if it returned the upgrade envelope, the marker reflects that. Never substitute one shape for the other.
