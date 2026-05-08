@@ -198,12 +198,6 @@ if [ -f "$WORK_DIR/_pings.jsonl" ]; then
   else
     fail "ping endpoint_type=$COLD_ET (expected localhost)"
   fi
-  COLD_PROFILE=$(jq -r '.profile' "$WORK_DIR/_pings.jsonl" | head -1)
-  if [ "$COLD_PROFILE" = "unknown" ]; then
-    pass "ping profile=unknown (AXONFLOW_PROFILE unset)"
-  else
-    fail "ping profile=$COLD_PROFILE (expected unknown)"
-  fi
   COLD_MODE=$(jq -r '.deployment_mode' "$WORK_DIR/_pings.jsonl" | head -1)
   if [ "$COLD_MODE" = "self_hosted" ]; then
     pass "ping deployment_mode=self_hosted (harness endpoint is 127.0.0.1)"

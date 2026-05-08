@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-05-08
+
+### Removed
+
+- Telemetry `profile` field and the `AXONFLOW_PROFILE` env-var read in
+  `scripts/telemetry-ping.sh`. The v1 schema reused `AXONFLOW_PROFILE`,
+  which already governs runtime policy enforcement (`dev | default |
+  strict | compliance`); the two name-spaces collided and a customer
+  setting `AXONFLOW_PROFILE=strict` would have had their heartbeat
+  rejected by the checkpoint validator. The field had no consumer on
+  the analytics side, and `deployment_mode` already covers the
+  topology dimension it was meant to add. Heartbeat payload no longer
+  emits `profile`; matching assertion removed from
+  `tests/heartbeat-real-stack/run_real_stack.sh`. `AXONFLOW_PROFILE`
+  reverts to its original governance-only meaning.
+
 ## [1.4.0] - 2026-05-08
 
 ### Added
