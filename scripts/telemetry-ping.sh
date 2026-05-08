@@ -231,13 +231,6 @@ classify_endpoint_type() {
 DEPLOYMENT_MODE=$(classify_deployment_mode "$ENDPOINT")
 ENDPOINT_TYPE=$(classify_endpoint_type "$ENDPOINT")
 
-PROFILE_RAW="${AXONFLOW_PROFILE:-}"
-if [ -z "$PROFILE_RAW" ]; then
-  PROFILE="unknown"
-else
-  PROFILE="$PROFILE_RAW"
-fi
-
 HOOK_COUNT=0
 HOOKS_FILE="$PLUGIN_DIR/hooks/hooks.json"
 if [ -f "$HOOKS_FILE" ]; then
@@ -253,7 +246,6 @@ PAYLOAD=$(jq -n \
   --arg runtime_version "${BASH_VERSION:-unknown}" \
   --arg deployment_mode "$DEPLOYMENT_MODE" \
   --arg endpoint_type "$ENDPOINT_TYPE" \
-  --arg profile "$PROFILE" \
   --arg instance_id "$INSTANCE_ID" \
   --argjson hook_count "$HOOK_COUNT" \
   --argjson platform_version "$PLATFORM_VERSION" \
@@ -268,8 +260,7 @@ PAYLOAD=$(jq -n \
     deployment_mode: $deployment_mode,
     endpoint_type: $endpoint_type,
     features: ["hooks:\($hook_count)"],
-    instance_id: $instance_id,
-    profile: $profile
+    instance_id: $instance_id
   }' 2>/dev/null)
 
 if [ -z "$PAYLOAD" ]; then
