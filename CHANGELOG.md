@@ -7,13 +7,11 @@
 ### Added
 
 - **V1.1 `/axonflow-list-recent-decisions`** slash command + skill (axonflow-enterprise#1982). Drives the new `list_recent_decisions` MCP tool; Free-tier cap-hits render the V1 upgrade envelope verbatim. Plus `runtime-e2e/list-recent-decisions/` and a 7th over-cap scenario in `tests/e2e/runtime-mcp-tools.sh`.
-- **v1 telemetry-schema** (axonflow-enterprise#2008): heartbeat now emits `telemetry_type: "plugin"`, `endpoint_type` (`localhost | private_network | remote | unknown`), and `profile` from `AXONFLOW_PROFILE`.
-- `AXONFLOW_PROFILE` env var: drives the new `profile` payload field; reports `unknown` when unset.
-- `AXONFLOW_TRY=1` env var: forces `deployment_mode=community_saas` for tenants behind custom hostnames proxying try.getaxonflow.com.
 
-### Changed
+### Telemetry
 
-- `deployment_mode` allowlist normalised to `self_hosted | community_saas | unknown` (was `production`/`development`/`community-saas`). Detection now derives from endpoint host + `AXONFLOW_TRY=1`. Analytics queries on the legacy values must update.
+- v1 schema (axonflow-enterprise#2008): heartbeat now emits `telemetry_type: "plugin"`, `endpoint_type` (`localhost | private_network | remote | unknown`), and `profile` from `AXONFLOW_PROFILE`; plus `AXONFLOW_TRY=1` to force `deployment_mode=community_saas` for tenants behind custom hostnames.
+- `deployment_mode` allowlist normalised to `self_hosted | community_saas | unknown` (was `production`/`development`/`community-saas`). Analytics queries on the legacy values must update.
 
 ## [1.3.0] - 2026-05-07 — V1 Plugin Pro upgrade-prompt envelope + 5 new MCP tools surfaced
 
