@@ -1,0 +1,55 @@
+---
+name: list-recent-decisions
+description: Surface the user's recent AxonFlow governance decisions — answers "what just got blocked", "show me my recent denials", or feeds a decision-history forensic flow
+---
+
+Use this skill when the user asks "what just got blocked?", "show me recent denials", "did anything need approval today?", or wants to trace a workflow's decision history.
+
+Call the `list_recent_decisions` MCP tool from the axonflow MCP server.
+
+Arguments (all optional):
+
+- `since` — RFC3339 lower bound (e.g. `2026-05-01T00:00:00Z`). Silently clamped to the tier's lookback window when reaching further back.
+- `decision` — `"allow"`, `"deny"`, or `"require_approval"`.
+- `policy_id` — filter to decisions matching this policy.
+- `tool_signature` — filter to decisions scoped to a specific tool.
+- `limit` — max rows (1–1000, capped per tier).
+
+Response shape:
+
+```json
+{
+  "decisions": [
+    {
+      "decision_id": "dec-abc123",
+      "timestamp": "2026-05-07T12:17:18Z",
+      "decision": "deny",
+      "policy_id": "pol-sqli",
+      "tool_signature": "postgres.query"
+    }
+  ]
+}
+```
+
+Present each row as a one-liner: `<timestamp> <decision> <policy_id> on <tool_signature>`. Suggest the user run `/axonflow-explain-decision <decision_id>` for the full reasoning behind any specific row.
+
+**Tier cap-hit handling (important):** Free / Community callers that exceed the page cap get a V1 upgrade envelope instead of decisions:
+
+```json
+{
+  "upgrade_required": true,
+  "envelope": {
+    "limit_type": "decision_list_size",
+    "tier": "Free",
+    "limit": 5,
+    "upgrade": {
+      "tier": "Pro",
+      "wording": "Free tier shows the last 5 decisions in 24h. Pro raises this to 100 decisions in the last 30 days.",
+      "compare_url": "https://getaxonflow.com/pricing/",
+      "buy_url": "https://buy.stripe.com/..."
+    }
+  }
+}
+```
+
+Render the wording verbatim and include the `upgrade.compare_url`. Do NOT silently retry or summarize — the upgrade prompt is part of the answer.
