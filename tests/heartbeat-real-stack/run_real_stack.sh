@@ -179,13 +179,36 @@ else
   fail "telemetry counter is $COLD_COUNTER (expected 1)"
 fi
 
-# Assertion 5: deployment_mode=community-saas in the captured ping.
+# Assertion 5: v1 telemetry-schema fields in the captured ping (#2008).
+# In this harness the heartbeat endpoint is the 127.0.0.1 fake (set via
+# AXONFLOW_HARNESS_AGENT_ENDPOINT), so the v1 classifier returns
+# endpoint_type=localhost and deployment_mode=self_hosted — the canary
+# log on stderr ("mode=community-saas") describes a separate
+# bootstrap-side mode dimension and is asserted independently above.
 if [ -f "$WORK_DIR/_pings.jsonl" ]; then
-  COLD_MODE=$(jq -r '.deployment_mode' "$WORK_DIR/_pings.jsonl" | head -1)
-  if [ "$COLD_MODE" = "community-saas" ]; then
-    pass "ping deployment_mode=community-saas"
+  COLD_TT=$(jq -r '.telemetry_type' "$WORK_DIR/_pings.jsonl" | head -1)
+  if [ "$COLD_TT" = "plugin" ]; then
+    pass "ping telemetry_type=plugin"
   else
-    fail "ping deployment_mode=$COLD_MODE (expected community-saas)"
+    fail "ping telemetry_type=$COLD_TT (expected plugin)"
+  fi
+  COLD_ET=$(jq -r '.endpoint_type' "$WORK_DIR/_pings.jsonl" | head -1)
+  if [ "$COLD_ET" = "localhost" ]; then
+    pass "ping endpoint_type=localhost (harness binds to 127.0.0.1)"
+  else
+    fail "ping endpoint_type=$COLD_ET (expected localhost)"
+  fi
+  COLD_PROFILE=$(jq -r '.profile' "$WORK_DIR/_pings.jsonl" | head -1)
+  if [ "$COLD_PROFILE" = "unknown" ]; then
+    pass "ping profile=unknown (AXONFLOW_PROFILE unset)"
+  else
+    fail "ping profile=$COLD_PROFILE (expected unknown)"
+  fi
+  COLD_MODE=$(jq -r '.deployment_mode' "$WORK_DIR/_pings.jsonl" | head -1)
+  if [ "$COLD_MODE" = "self_hosted" ]; then
+    pass "ping deployment_mode=self_hosted (harness endpoint is 127.0.0.1)"
+  else
+    fail "ping deployment_mode=$COLD_MODE (expected self_hosted)"
   fi
 fi
 

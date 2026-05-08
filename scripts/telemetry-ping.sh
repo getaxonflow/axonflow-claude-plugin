@@ -173,12 +173,69 @@ else
   PLATFORM_VERSION="\"${PLATFORM_VERSION}\""
 fi
 
-if [ "${AXONFLOW_MODE:-}" = "community-saas" ]; then
-  DEPLOYMENT_MODE="community-saas"
-elif [ -n "${AXONFLOW_AUTH:-}" ]; then
-  DEPLOYMENT_MODE="production"
+# v1 telemetry-schema (#2008) classifiers. deployment_mode is derived from
+# the configured endpoint host plus the AXONFLOW_TRY=1 explicit override;
+# endpoint_type follows the SDK ClassifyEndpoint shape so cross-client
+# analytics dimensions stay consistent. Both functions return one of the
+# fixed v1 allowlist values; "unknown" is preferred over silent fallback
+# when input is missing/unparseable.
+classify_deployment_mode() {
+  local endpoint="$1"
+  if [ "${AXONFLOW_TRY:-}" = "1" ]; then
+    printf 'community_saas'
+    return
+  fi
+  if [ -z "$endpoint" ]; then
+    printf 'unknown'
+    return
+  fi
+  local host
+  host=$(printf '%s' "$endpoint" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+).*#\1#p' | tr '[:upper:]' '[:lower:]')
+  if [ -z "$host" ]; then
+    printf 'unknown'
+    return
+  fi
+  case "$host" in
+    try.getaxonflow.com|*.try.getaxonflow.com)
+      printf 'community_saas' ;;
+    *)
+      printf 'self_hosted' ;;
+  esac
+}
+
+classify_endpoint_type() {
+  local endpoint="$1"
+  if [ -z "$endpoint" ]; then
+    printf 'unknown'
+    return
+  fi
+  local host
+  host=$(printf '%s' "$endpoint" | sed -nE 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/:?#]+).*#\1#p' | tr '[:upper:]' '[:lower:]')
+  if [ -z "$host" ]; then
+    printf 'unknown'
+    return
+  fi
+  case "$host" in
+    localhost|127.0.0.1|::1|0.0.0.0|*.localhost)
+      printf 'localhost'; return ;;
+    *.local|*.internal|*.lan|*.intranet)
+      printf 'private_network'; return ;;
+  esac
+  case "$host" in
+    10.*|192.168.*) printf 'private_network'; return ;;
+    172.1[6-9].*|172.2[0-9].*|172.3[01].*) printf 'private_network'; return ;;
+  esac
+  printf 'remote'
+}
+
+DEPLOYMENT_MODE=$(classify_deployment_mode "$ENDPOINT")
+ENDPOINT_TYPE=$(classify_endpoint_type "$ENDPOINT")
+
+PROFILE_RAW="${AXONFLOW_PROFILE:-}"
+if [ -z "$PROFILE_RAW" ]; then
+  PROFILE="unknown"
 else
-  DEPLOYMENT_MODE="development"
+  PROFILE="$PROFILE_RAW"
 fi
 
 HOOK_COUNT=0
@@ -188,16 +245,20 @@ if [ -f "$HOOKS_FILE" ]; then
 fi
 
 PAYLOAD=$(jq -n \
+  --arg telemetry_type "plugin" \
   --arg sdk "claude-code-plugin" \
   --arg sdk_version "$SDK_VERSION" \
   --arg os "$(uname -s)" \
   --arg arch "$(uname -m)" \
   --arg runtime_version "${BASH_VERSION:-unknown}" \
   --arg deployment_mode "$DEPLOYMENT_MODE" \
+  --arg endpoint_type "$ENDPOINT_TYPE" \
+  --arg profile "$PROFILE" \
   --arg instance_id "$INSTANCE_ID" \
   --argjson hook_count "$HOOK_COUNT" \
   --argjson platform_version "$PLATFORM_VERSION" \
   '{
+    telemetry_type: $telemetry_type,
     sdk: $sdk,
     sdk_version: $sdk_version,
     platform_version: $platform_version,
@@ -205,8 +266,10 @@ PAYLOAD=$(jq -n \
     arch: $arch,
     runtime_version: $runtime_version,
     deployment_mode: $deployment_mode,
+    endpoint_type: $endpoint_type,
     features: ["hooks:\($hook_count)"],
-    instance_id: $instance_id
+    instance_id: $instance_id,
+    profile: $profile
   }' 2>/dev/null)
 
 if [ -z "$PAYLOAD" ]; then
