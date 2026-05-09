@@ -117,7 +117,7 @@ every governed request.
  `~/.config/axonflow/try-registration.json`, or
  `$AXONFLOW_CONFIG_DIR/try-registration.json` when set), current tier
  (`Free` vs `Pro`), the redacted license-token preview
- (`set (AXON-.XXXX)`), and — for Free-tier users — the upgrade URL
+ (`set (AXON-...XXXX)`), and — for Free-tier users — the upgrade URL
  (`AXONFLOW_UPGRADE_URL` env or `https://getaxonflow.com/pricing/`). The
  `tenant_id` line is the value buyers paste into the Stripe checkout
  custom field when upgrading to AxonFlow Pro. Token output is always
@@ -147,7 +147,7 @@ every governed request.
 - **Mode-clarity canary extension.** When a paid token is configured the
  `pre-tool-check` hook emits an additional `[AxonFlow] Pro tier active
  (X-License-Token configured)` line on stderr alongside the existing
- `[AxonFlow] Connected to AxonFlow at <URL> (mode=.)` canary.
+ `[AxonFlow] Connected to AxonFlow at <URL> (mode=...)` canary.
 - **Two new runtime tests.** A test bundle proves the
  `X-License-Token` header reaches the wire across all three resolution
  modes (env, file, absent) via a Python `http.server` capture proxy.
@@ -157,7 +157,7 @@ every governed request.
 
 ### Fixed
 
-- **Upgrade-pointer URL aligned with the canonical pricing page.** `AXONFLOW_UPGRADE_URL` default (the URL surfaced by `/axonflow-status` and `scripts/status.sh` to free-tier users, plus embedded in the `tier=Free (Pro expired. — visit. to renew)` line) is now `https://getaxonflow.com/pricing/`. The previous default `https://getaxonflow.com/pro` returned 404 — that page was referenced in PRDs but never built. The pricing page already resolves and carries the Plugin Pro $9.99 tier card with the Stripe buy button, so plugin status output now points free-tier users at a working URL. Override via `AXONFLOW_UPGRADE_URL` env var if needed. Same fix landed in companion plugin releases (openclaw-plugin v2.2.0, cursor-plugin v1.2.0, codex-plugin v1.2.0).
+- **Upgrade-pointer URL aligned with the canonical pricing page.** `AXONFLOW_UPGRADE_URL` default (the URL surfaced by `/axonflow-status` and `scripts/status.sh` to free-tier users, plus embedded in the `tier=Free (Pro expired ... — visit ... to renew)` line) is now `https://getaxonflow.com/pricing/`. The previous default `https://getaxonflow.com/pro` returned 404 — that page was referenced in PRDs but never built. The pricing page already resolves and carries the Plugin Pro $9.99 tier card with the Stripe buy button, so plugin status output now points free-tier users at a working URL. Override via `AXONFLOW_UPGRADE_URL` env var if needed. Same fix landed in companion plugin releases (openclaw-plugin v2.2.0, cursor-plugin v1.2.0, codex-plugin v1.2.0).
 - **`/axonflow-recover-verify` error output**: when the platform returned
  a 4xx with the standard error envelope `{"error":{"code":N,"message":"."}}`,
  the script previously echoed the whole nested object as JSON instead
@@ -201,7 +201,7 @@ The full set of platform-side security fixes shipped alongside this release — 
 
 **Reliability and bug-fix highlights:**
 - **7-day delivered-heartbeat with stamp-on-success** (this release). Telemetry stamp advances only after the POST returns 2xx, so a transient network failure no longer silences telemetry until the next 7-day window. Concurrent invocations are de-duplicated by an in-flight gate.
-- **Mode-clarity canary log line** on every hook init (this release). Stderr emits `[AxonFlow] Connected to AxonFlow at <URL> (mode=.)` and a PR-blocking CI gate asserts the canary matches the actual outbound destination, guarding against silent endpoint drift.
+- **Mode-clarity canary log line** on every hook init (this release). Stderr emits `[AxonFlow] Connected to AxonFlow at <URL> (mode=...)` and a PR-blocking CI gate asserts the canary matches the actual outbound destination, guarding against silent endpoint drift.
 - **PR-blocking install-to-use smoke against the live community stack** (this release). Catches plugin-side regressions against `try.getaxonflow.com` before they reach a user's terminal.
 
 ### BREAKING
@@ -328,7 +328,7 @@ to the v0.4.0 block-reason format.
 
 - MCP server integration with 6 governance tools: `check_policy`, `check_output`, `audit_tool_call`, `list_policies`, `get_policy_stats`, `search_audit_events`
 - Automatic PreToolUse hook: evaluates tool inputs against AxonFlow policies before execution. Blocks dangerous commands, reverse shells, SSRF, credential access, path traversal.
-- Automatic PostToolUse hook: records tool execution in AxonFlow audit trail and scans output for PII/secrets. Scans Bash redirect commands (`echo. > file`) when stdout is empty.
+- Automatic PostToolUse hook: records tool execution in AxonFlow audit trail and scans output for PII/secrets. Scans Bash redirect commands (`echo ... > file`) when stdout is empty.
 - Audit logging for blocked attempts: denied tool calls are recorded in the audit trail for compliance evidence.
 - Fail-open on network failure, fail-closed on auth/config errors.
 - Governed tools: `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP tools (`mcp__*`).
