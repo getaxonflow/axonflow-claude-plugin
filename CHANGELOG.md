@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-05-19 — Terminology: `tenant_id` → `client_id` in user-facing output
+
+### Changed
+
+- **`/axonflow-status` output: `tenant_id` label is now `client_id`.** Same value, new user-facing term. Aligns Claude Code plugin output with the rest of AxonFlow's v9 terminology (the `org_id` ↔ `client_id` ↔ deployment-license-identity three-identifier model — see [axonflow-enterprise#2230](https://github.com/getaxonflow/axonflow-enterprise/issues/2230)). For this release, the output carries a parenthetical bridge note (`(formerly tenant_id)`) so existing users connect the old and new terms without surprise. The bridge note will be removed in v1.6.0.
+
+  **Cosmetic only — no config change is required.** The on-disk registration file at `~/.config/axonflow/try-registration.json` continues to use the `tenant_id` JSON key (file-format compat with installed base); only the human-readable status output reads `client_id`. Wire-level `X-Axonflow-Client` header is unchanged. The agent-side MCP tool `axonflow_get_tenant_id` keeps its name (callable both as muscle-memory "what's my tenant ID?" and the new "what's my client ID?" — both return the same identifier).
+
+  **Action required for users who scripted around the old output:** if your tooling greps for `tenant_id=cs_` in `/axonflow-status` stdout, update to grep for `client_id=cs_` (or use the underlying `~/.config/axonflow/try-registration.json` file which still carries the legacy key).
+
+- **README install-flow examples** updated to use `client_id` terminology consistently. The "Activate Pro tier" walkthrough notes that Stripe Checkout's custom field is still labeled "AxonFlow tenant ID" until that form is updated separately.
+
 ## [1.4.0] - 2026-05-09 — Decision History API + policy_version recorded on every decision + telemetry simplification
 
 ### Added
