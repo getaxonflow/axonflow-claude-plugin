@@ -50,6 +50,11 @@ jobs:
           chmod +x tests/test-skill-status-prefers-local.sh
           ./tests/test-skill-status-prefers-local.sh
 
+      - name: Run status-output terminology assertion (client_id label)
+        run: |
+          chmod +x tests/test-status-client-id-label.sh
+          ./tests/test-status-client-id-label.sh
+
       - name: Validate plugin structure
         run: |
           # Required files must exist

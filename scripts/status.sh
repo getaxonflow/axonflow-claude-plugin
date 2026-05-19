@@ -3,15 +3,20 @@
 #
 # Prints a one-screen status block for the AxonFlow Claude Code plugin so
 # the user can:
-#   1. find their `tenant_id` (needed to paste into the Stripe checkout
+#   1. find their `client_id` (needed to paste into the Stripe checkout
 #      custom field when upgrading to AxonFlow Pro),
 #   2. confirm whether the plugin is currently in Free or Pro tier mode, and
 #   3. see when the Pro license expires (so they can renew before it lapses
 #      rather than discovering it at the next governed tool call).
 #
+# v1.5.0 terminology: the label is `client_id`; on-disk the field is still
+# stored as `tenant_id` in ~/.config/axonflow/try-registration.json (kept
+# for file-format compat with the installed base). Same value, new
+# user-facing name. See CHANGELOG v1.5.0.
+#
 # Output is line-oriented to match login.sh / recover.sh:
 #   OK  endpoint=<url>
-#   OK  tenant_id=<id>            (or:  WARN tenant_id=<empty>  recovery hint)
+#   OK  client_id=<id>           (or:  WARN client_id=<empty>  recovery hint)
 #   OK  tier=Pro (expires 2026-08-03, 90 days remaining)        (Pro active)
 #   OK  tier=Free (Pro expired 2026-02-04 — visit <url> to renew) (Pro lapsed)
 #   OK  tier=Free (no Pro license configured)                    (Free)
@@ -33,7 +38,7 @@
 # variant rather than blocking the status surface.
 #
 # Exit codes:
-#   0 — status printed (always, even with an empty tenant_id; the recovery
+#   0 — status printed (always, even with an empty client_id; the recovery
 #       hint is enough — no point failing the slash command on a missing
 #       file the user would then have to debug).
 #   1 — wholly unexpected internal failure (jq missing, etc.)
@@ -58,14 +63,17 @@ fi
 CONFIG_DIR="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}"
 REG_FILE="${CONFIG_DIR}/try-registration.json"
 
-# Resolve tenant_id from the registration file. Don't enforce 0600 here:
-# /axonflow-status is a read-only diagnostic. If the file is world-readable
-# we still want to show the tenant_id (the user needs it for the Stripe
-# checkout) but emit a stderr warning so they know to chmod it.
-TENANT_ID=""
+# Resolve client_id from the registration file. The JSON field is still
+# `tenant_id` on disk (file-format compat with existing installs from
+# v1.4.0 and earlier); we read it under its old key but surface it under
+# the new label. Don't enforce 0600 here: /axonflow-status is a read-only
+# diagnostic. If the file is world-readable we still want to show the
+# client_id (the user needs it for the Stripe checkout) but emit a stderr
+# warning so they know to chmod it.
+CLIENT_ID=""
 if [ -f "$REG_FILE" ]; then
   if command -v jq >/dev/null 2>&1; then
-    TENANT_ID=$(jq -r '.tenant_id // empty' "$REG_FILE" 2>/dev/null || true)
+    CLIENT_ID=$(jq -r '.tenant_id // empty' "$REG_FILE" 2>/dev/null || true)
   fi
   # Permission probe — same portability dance as license-token.sh.
   mode=$(stat -c %a "$REG_FILE" 2>/dev/null) || mode=""
@@ -206,10 +214,10 @@ fi
 
 # Emit the status block.
 echo "OK  endpoint=${ENDPOINT}"
-if [ -n "$TENANT_ID" ]; then
-  echo "OK  tenant_id=${TENANT_ID}"
+if [ -n "$CLIENT_ID" ]; then
+  echo "OK  client_id=${CLIENT_ID}  (formerly tenant_id)"
 else
-  echo "WARN tenant_id=<not found at ${REG_FILE}>"
+  echo "WARN client_id=<not found at ${REG_FILE}>  (formerly tenant_id)"
   echo "    Run /axonflow-recover <email> if you've lost your registration,"
   echo "    or remove ${REG_FILE} and reload Claude Code to re-register against ${ENDPOINT}."
 fi
@@ -217,7 +225,8 @@ echo "OK  tier=${TIER_LINE}"
 echo "OK  license_token=${TOKEN_DISPLAY}"
 if [ "$TIER_KIND" = "free" ]; then
   echo "OK  upgrade_url=${UPGRADE_URL}"
-  echo "    Paste your tenant_id above into the 'AxonFlow tenant ID' custom field at checkout."
+  echo "    Paste your client_id above into the Stripe checkout custom field"
+  echo "    (currently labeled 'AxonFlow tenant ID' on the Stripe form)."
 elif [ "$PRO_EXPIRED_FLAG" -eq 1 ]; then
   echo "    Your Pro license token is on disk but its 'exp' has passed; the plugin will not"
   echo "    forward it on governed requests. After renewal, run /axonflow-login --token <new>."

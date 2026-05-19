@@ -204,8 +204,8 @@ Plugin Pro extends the Free baseline (3-day audit retention, 200 governed events
 
 To activate Pro on an installed plugin:
 
-1. **Find your tenant ID.** Run `/axonflow-status` from any Claude Code session. The output includes a `tenant_id=cs_<uuid>` line — that's the value Stripe Checkout needs to bind the license to your tenant. Copy it.
-2. **Buy at the pricing page.** Visit [getaxonflow.com/pricing](https://getaxonflow.com/pricing/) and click **Buy Plugin Pro — $9.99**. At Stripe Checkout, paste your `tenant_id` into the **AxonFlow tenant ID** custom field.
+1. **Find your client ID.** Run `/axonflow-status` from any Claude Code session. The output includes a `client_id=cs_<uuid>` line — that's the value Stripe Checkout needs to bind the license to your account. Copy it. (Same value the v1.4.x and earlier output called `tenant_id`; renamed for terminology consistency with the rest of AxonFlow in v1.5.0.)
+2. **Buy at the pricing page.** Visit [getaxonflow.com/pricing](https://getaxonflow.com/pricing/) and click **Buy Plugin Pro — $9.99**. At Stripe Checkout, paste your `client_id` into the **AxonFlow tenant ID** custom field. (The Stripe form's field label is still "AxonFlow tenant ID" — same value, the label will be renamed in a future release.)
 3. **Install the issued license token.** After checkout you'll receive an `AXON-...` license token by email. Activate it via `/axonflow-login <your-AXON-token>` (the slash command's argument is the token itself), or by setting `AXONFLOW_LICENSE_TOKEN=<your-AXON-token>` in the environment Claude Code runs in.
 4. **Reload Claude Code.** The next governed call uses Pro-tier limits automatically. The plugin's status canary appends `Pro tier active` so you can verify at a glance.
 
@@ -213,20 +213,21 @@ If you lose the token (laptop reinstall, never archived the email), use `/axonfl
 
 ### Check status
 
-Run `/axonflow-status` from any Claude Code session to see your `tenant_id`, the resolved AxonFlow endpoint, and current tier (`Free` vs `Pro`):
+Run `/axonflow-status` from any Claude Code session to see your `client_id`, the resolved AxonFlow endpoint, and current tier (`Free` vs `Pro`):
 
 ```
 OK  endpoint=https://try.getaxonflow.com
-OK  tenant_id=cs_a1b2c3d4-...
+OK  client_id=cs_a1b2c3d4-...  (formerly tenant_id)
 OK  tier=Free
 OK  license_token=unset
 OK  upgrade_url=https://getaxonflow.com/pricing/
-    Paste your tenant_id above into the 'AxonFlow tenant ID' custom field at checkout.
+    Paste your client_id above into the Stripe checkout custom field
+    (currently labeled 'AxonFlow tenant ID' on the Stripe form).
 ```
 
-The `tenant_id` is the value to paste into the **AxonFlow tenant ID** custom field at Stripe checkout when upgrading to AxonFlow Pro. The license token is always shown redacted (`set (AXON-...XXXX)`) — the full bearer credential is never printed, so the output is safe to screen-share or paste into a support ticket.
+The `client_id` is the value to paste into the Stripe checkout custom field (still labeled "AxonFlow tenant ID" on the Stripe form) when upgrading to AxonFlow Pro. The on-disk registration file at `~/.config/axonflow/try-registration.json` still uses the `tenant_id` JSON key for file-format compat — same value, two names during the v9 transition. The license token is always shown redacted (`set (AXON-...XXXX)`) — the full bearer credential is never printed, so the output is safe to screen-share or paste into a support ticket.
 
-> **Tip:** the same information is available without spawning a shell — just ask Claude "what's my AxonFlow tenant ID?" and it will call the agent-side `axonflow_get_tenant_id` MCP tool, which returns `tenant_id`, the server-resolved tier, and the upgrade URLs. Other agent-callable Pro-related tools include `axonflow_list_pro_features` ("what would I get if I upgraded?") and `axonflow_get_cost_estimate` (Pro-only LLM cost pre-flight). See [The 15 MCP tools Claude can call](#the-15-mcp-tools-claude-can-call) below.
+> **Tip:** the same information is available without spawning a shell — just ask Claude "what's my AxonFlow client ID?" (or "tenant ID" — both work) and it will call the agent-side `axonflow_get_tenant_id` MCP tool, which returns the same identifier under its original wire name, the server-resolved tier, and the upgrade URLs. Other agent-callable Pro-related tools include `axonflow_list_pro_features` ("what would I get if I upgraded?") and `axonflow_get_cost_estimate` (Pro-only LLM cost pre-flight). See [The 15 MCP tools Claude can call](#the-15-mcp-tools-claude-can-call) below.
 
 ### Free-tier limits and upgrade prompts
 
