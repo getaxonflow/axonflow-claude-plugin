@@ -16,7 +16,10 @@ POST_HOOK="$PLUGIN_DIR/scripts/post-tool-audit.sh"
 PASS=0
 FAIL=0
 MOCK_PID=""
-MOCK_PORT=18199
+# MOCK_PORT is allocated dynamically by start_mock_server so consecutive test
+# runs don't collide on TIME_WAIT (issue #85). Initialized empty here so the
+# unset-set check in start_mock_server doesn't trip set -u.
+MOCK_PORT=""
 
 # --- Test Helpers ---
 
@@ -102,11 +105,18 @@ TELEMETRY_CAPTURE_FILE=""
 
 start_mock_server() {
     TELEMETRY_CAPTURE_FILE=$(mktemp)
-    # Python mock server that responds based on the statement content
+    local port_file
+    port_file=$(mktemp)
+    # Python mock server that responds based on the statement content. Binds
+    # to port 0 (ephemeral) and writes the assigned port back so the rest of
+    # the test reads the actual port — prevents TIME_WAIT collisions between
+    # consecutive runs that previously caused storm-of-failures in run N+1
+    # after run N (issue #85).
     python3 -c "
-import http.server, json, sys
+import http.server, json, sys, os as _os, threading as _threading
 
 TELEMETRY_FILE = '$TELEMETRY_CAPTURE_FILE'
+PORT_FILE = '$port_file'
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -135,10 +145,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get('Content-Length', 0))
         raw = self.rfile.read(length) if length > 0 else b''
 
-        # Telemetry ping endpoint
+        # Telemetry ping endpoint. Concurrent POSTs from backgrounded probes
+        # in pre-tool-check.sh + the foreground telemetry test can race on
+        # TELEMETRY_FILE. Use atomic write (tmp + rename) so a partial /
+        # interleaved write from a concurrent thread can't appear to a
+        # reader as a truncated file (issue #85 — caused 'sdk field missing'
+        # failures in the 'payload has required fields' test).
         if self.path == '/v1/ping':
-            with open(TELEMETRY_FILE, 'w') as f:
+            tmp = TELEMETRY_FILE + '.' + str(_os.getpid()) + '.' + str(_threading.get_ident()) + '.tmp'
+            with open(tmp, 'w') as f:
                 f.write(raw.decode('utf-8', errors='replace'))
+                f.flush()
+                _os.fsync(f.fileno())
+            _os.replace(tmp, TELEMETRY_FILE)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
@@ -195,10 +214,58 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass  # Suppress logs
 
-http.server.HTTPServer(('127.0.0.1', $MOCK_PORT), Handler).serve_forever()
+# ThreadingHTTPServer handles concurrent requests. The previous single-threaded
+# HTTPServer caused intermittent test failures (issue #85) because
+# pre-tool-check.sh backgrounds version-check.sh which probes /health
+# concurrently with the next test's foreground curl. With a sequential server
+# the foreground request queued behind the backgrounded one and could time out
+# under load, producing the swinging-failure-count pattern (0/0/15 etc).
+#
+# Python's default request_queue_size (socket listen backlog) is 5, which
+# is too small for the load this test creates (14+ POSTs + 6+ backgrounded
+# /health probes in rapid succession). On macOS, an undersized backlog
+# makes the kernel drop new SYNs once the queue fills, surfacing in curl
+# as 'Connection timed out' on a perfectly healthy server. Bumping to 256
+# eliminated the remaining intermittent /v1/ping POST timeouts.
+class S(http.server.ThreadingHTTPServer):
+    request_queue_size = 256
+    allow_reuse_address = True
+srv = S(('127.0.0.1', 0), Handler)
+with open(PORT_FILE, 'w') as _f:
+    _f.write(str(srv.server_address[1]))
+srv.serve_forever()
 " &
     MOCK_PID=$!
-    sleep 1
+
+    # Wait for the server to write its assigned port. Without this the test
+    # would race the Python startup; a slow CI runner could let the first
+    # few hook calls fire before MOCK_PORT was resolvable.
+    local attempts=0
+    while [ "$attempts" -lt 50 ]; do
+        if [ -s "$port_file" ]; then
+            MOCK_PORT=$(cat "$port_file")
+            break
+        fi
+        attempts=$((attempts + 1))
+        sleep 0.1
+    done
+    rm -f "$port_file"
+    if [ -z "$MOCK_PORT" ]; then
+        echo "FATAL: mock server did not write its port after 5s" >&2
+        return 1
+    fi
+
+    # Readiness probe — confirm the bound port is actually accepting requests.
+    attempts=0
+    while [ "$attempts" -lt 30 ]; do
+        if curl -sf -o /dev/null --max-time 1 "http://127.0.0.1:$MOCK_PORT/health" 2>/dev/null; then
+            return 0
+        fi
+        attempts=$((attempts + 1))
+        sleep 0.1
+    done
+    echo "FATAL: mock server did not respond on port $MOCK_PORT after 3s" >&2
+    return 1
 }
 
 stop_mock_server() {
@@ -382,6 +449,18 @@ assert_eq "Exit code is 0 (never blocks)" "0" "$EXIT_CODE"
 # ============================================================
 # Telemetry Tests (v0.4.0)
 # ============================================================
+
+# Drain backgrounded children (version-check.sh + telemetry-ping.sh
+# spawned by pre-tool-check.sh / post-tool-audit.sh in the test blocks
+# above). Without this drain, the first telemetry test below races
+# against a still-in-flight /health probe from the PreToolUse / PostToolUse
+# hooks, and intermittently the foreground POST in this section times
+# out (issue #85).
+#
+# Can't use bare `wait` — that would block on the mock server PID which
+# never exits. Sleep covers the upper bound of background curls'
+# timeouts (2s /health + 3s telemetry POST + buffer).
+sleep 6
 
 TELEMETRY_SCRIPT="$PLUGIN_DIR/scripts/telemetry-ping.sh"
 ORIGINAL_HOME="$HOME"
