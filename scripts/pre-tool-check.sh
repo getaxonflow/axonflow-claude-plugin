@@ -231,6 +231,17 @@ if axonflow_handle_envelope_response "$HTTP_CODE" "$PRECHECK_BODY" "$PRECHECK_HE
   exit 0
 fi
 
+# HTTP 401 — invalid/expired credentials. Stamp a 5-minute throttle so the
+# next ~150 hook fires short-circuit locally instead of generating a fresh
+# 401 each. Closes axonflow-enterprise#2275 (716 × 401 in 24h from a single
+# source IP — every pre-tool-check + post-tool-audit hook re-fired because
+# 401 was not envelope-bearing and the existing handler returned 1 for
+# anything other than 429/403, leaving the script to fall through with no
+# back-off).
+if axonflow_handle_auth_failure "$HTTP_CODE" "$PRECHECK_BODY" "$PRECHECK_HEADERS"; then
+  exit 0
+fi
+
 RESPONSE=$(cat "$PRECHECK_BODY")
 if [ -z "$RESPONSE" ]; then
   exit 0

@@ -178,6 +178,13 @@ if [ -n "$OUTPUT_TEXT" ] && [ "$OUTPUT_TEXT" != "null" ]; then
   if axonflow_handle_envelope_response "$SCAN_HTTP" "$SCAN_BODY" "$SCAN_HEADERS"; then
     exit 0
   fi
+  # HTTP 401 on the scan call — invalid/expired credentials. Same throttle
+  # path as pre-tool-check: stamp 5-minute cooldown + once-per-day nudge,
+  # then fall open. Closes axonflow-enterprise#2275 (auth-storm retry loop
+  # against /api/v1/audit/tool-call).
+  if axonflow_handle_auth_failure "$SCAN_HTTP" "$SCAN_BODY" "$SCAN_HEADERS"; then
+    exit 0
+  fi
   SCAN_RESPONSE=$(cat "$SCAN_BODY" 2>/dev/null || echo "")
 
   # If PII was found, add context for Claude
