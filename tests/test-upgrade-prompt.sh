@@ -435,6 +435,161 @@ test_no_stdout_bytes() {
 }
 
 # ---------------------------------------------------------------------------
+# Test 9: HTTP 401 → axonflow_handle_auth_failure stamps a 5-minute throttle
+# with limit_type=auth_failure + emits the credential-refresh nudge to
+# stderr. Regression guard for axonflow-enterprise#2275 (auth-storm retry
+# loop: 716 × 401 in 24h from a single source IP because 401 wasn't
+# detected by the envelope handler).
+# ---------------------------------------------------------------------------
+test_401_auth_failure_stamps_throttle() {
+  local cache; cache=$(mk_tmp_cache)
+  trap "rm -rf '$cache'" EXIT
+  export XDG_CACHE_HOME="$cache"
+  # Ensure the test doesn't inherit a custom cooldown from the host env.
+  unset AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS
+
+  local body headers stderr_out
+  body=$(mktemp); echo '{"error":"invalid credentials"}' >"$body"
+  headers=$(mktemp); printf 'HTTP/2 401\r\ncontent-type: application/json\r\n' >"$headers"
+  stderr_out=$(mktemp)
+
+  # shellcheck disable=SC1090
+  . "$HELPER"
+
+  local now_before; now_before=$(date -u +%s)
+  axonflow_handle_auth_failure "401" "$body" "$headers" 2>"$stderr_out"
+  local rc=$?
+
+  assert_eq "rc == 0 (401 detected)" "0" "$rc"
+  assert_contains "stderr names HTTP 401" "$(cat "$stderr_out")" "Authentication failed (HTTP 401)"
+  assert_contains "stderr names 5-minute pause" "$(cat "$stderr_out")" "paused for 5 minutes"
+  assert_contains "stderr links to dashboard for credential refresh" \
+    "$(cat "$stderr_out")" "https://getaxonflow.com/dashboard"
+
+  # Throttle file written with auth_failure limit_type and deadline ~ now + 300.
+  local tf="$cache/axonflow/throttle-until"
+  assert_eq "throttle file exists" "yes" "$([ -f "$tf" ] && echo yes || echo no)"
+  if [ -f "$tf" ]; then
+    local epoch limit
+    epoch=$(awk 'NR==1 {print $1}' "$tf")
+    limit=$(awk 'NR==1 {print $2}' "$tf")
+    assert_eq "limit_type stamped as auth_failure" "auth_failure" "$limit"
+    # Deadline must sit in the (now+290, now+310) window — allow ±10s wall-clock
+    # slack so this assertion isn't flaky on a busy CI runner without losing
+    # the mutation-test value (a cooldown of 0 collapses to 'now' which is
+    # well outside the lower bound and trips the assertion).
+    local now_after; now_after=$(date -u +%s)
+    local floor=$((now_before + 290))
+    local ceil=$((now_after + 310))
+    if [ -n "$epoch" ] && [ "$epoch" -ge "$floor" ] && [ "$epoch" -le "$ceil" ]; then
+      assert_eq "deadline ~ now + 300s" "yes" "yes"
+    else
+      assert_eq "deadline ~ now + 300s" "yes" \
+        "no (epoch=$epoch, floor=$floor, ceil=$ceil)"
+    fi
+  fi
+
+  rm -f "$body" "$headers" "$stderr_out"
+}
+
+# ---------------------------------------------------------------------------
+# Test 10: non-401 statuses (403, 429, 500, network failure as empty string)
+# are NOT handled by axonflow_handle_auth_failure. Critical guard so the
+# 401 path doesn't shadow the existing 429/403 envelope path or stamp a
+# throttle on transient 5xx (which would unnecessarily silence governance).
+# ---------------------------------------------------------------------------
+test_non_401_statuses_not_handled() {
+  local cache; cache=$(mk_tmp_cache)
+  trap "rm -rf '$cache'" EXIT
+  export XDG_CACHE_HOME="$cache"
+
+  local body headers
+  body=$(mktemp); echo '{}' >"$body"
+  headers=$(mktemp); echo "" >"$headers"
+
+  # shellcheck disable=SC1090
+  . "$HELPER"
+
+  axonflow_handle_auth_failure "403" "$body" "$headers" 2>/dev/null
+  assert_eq "rc != 0 for HTTP 403 (envelope handler owns this)" "1" "$?"
+  axonflow_handle_auth_failure "429" "$body" "$headers" 2>/dev/null
+  assert_eq "rc != 0 for HTTP 429 (envelope handler owns this)" "1" "$?"
+  axonflow_handle_auth_failure "500" "$body" "$headers" 2>/dev/null
+  assert_eq "rc != 0 for HTTP 500 (transient, fall through)" "1" "$?"
+  axonflow_handle_auth_failure "200" "$body" "$headers" 2>/dev/null
+  assert_eq "rc != 0 for HTTP 200 (success, fall through)" "1" "$?"
+  axonflow_handle_auth_failure "" "$body" "$headers" 2>/dev/null
+  assert_eq "rc != 0 for empty status (curl network failure)" "1" "$?"
+
+  # Throttle file MUST NOT exist after any of the above.
+  local tf="$cache/axonflow/throttle-until"
+  assert_eq "throttle file NOT stamped on non-401" "no" \
+    "$([ -f "$tf" ] && echo yes || echo no)"
+
+  rm -f "$body" "$headers"
+}
+
+# ---------------------------------------------------------------------------
+# Test 11: second consecutive 401 within the same UTC day suppresses the
+# stderr prompt (one-time-per-day stamp), but still re-stamps the throttle
+# deadline. Matches the envelope-prompt behaviour.
+# ---------------------------------------------------------------------------
+test_401_prompt_once_per_day() {
+  local cache; cache=$(mk_tmp_cache)
+  trap "rm -rf '$cache'" EXIT
+  export XDG_CACHE_HOME="$cache"
+  unset AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS
+
+  local body headers stderr1 stderr2
+  body=$(mktemp); echo '{}' >"$body"
+  headers=$(mktemp); echo "" >"$headers"
+  stderr1=$(mktemp)
+  stderr2=$(mktemp)
+
+  # shellcheck disable=SC1090
+  . "$HELPER"
+
+  axonflow_handle_auth_failure "401" "$body" "$headers" 2>"$stderr1"
+  axonflow_handle_auth_failure "401" "$body" "$headers" 2>"$stderr2"
+
+  assert_contains "first 401 prints credential-refresh nudge" \
+    "$(cat "$stderr1")" "Authentication failed (HTTP 401)"
+  assert_not_contains "second 401 suppresses nudge (once-per-day stamp)" \
+    "$(cat "$stderr2")" "Authentication failed (HTTP 401)"
+
+  # Throttle file still present (re-stamped on second 401).
+  local tf="$cache/axonflow/throttle-until"
+  assert_eq "throttle file still present after second 401" "yes" \
+    "$([ -f "$tf" ] && echo yes || echo no)"
+
+  rm -f "$body" "$headers" "$stderr1" "$stderr2"
+}
+
+# ---------------------------------------------------------------------------
+# Test 12: stdout is empty under the 401 path — stdout is the Claude Code
+# hook protocol surface and any byte breaks the parser.
+# ---------------------------------------------------------------------------
+test_401_no_stdout_bytes() {
+  local cache; cache=$(mk_tmp_cache)
+  trap "rm -rf '$cache'" EXIT
+  export XDG_CACHE_HOME="$cache"
+
+  local body headers stdout_out
+  body=$(mktemp); echo '{}' >"$body"
+  headers=$(mktemp); echo "" >"$headers"
+  stdout_out=$(mktemp)
+
+  # shellcheck disable=SC1090
+  . "$HELPER"
+
+  axonflow_handle_auth_failure "401" "$body" "$headers" >"$stdout_out" 2>/dev/null
+  local size; size=$(wc -c <"$stdout_out" | tr -d ' ')
+  assert_eq "stdout is empty on 401 path" "0" "$size"
+
+  rm -f "$body" "$headers" "$stdout_out"
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 run_test "T1: 429 daily-quota envelope" test_429_daily_quota
@@ -445,6 +600,10 @@ run_test "T5: non-4xx status ignored" test_non_4xx_status_ignored
 run_test "T6: once-per-day stamp suppresses second wording" test_once_per_day_stamp
 run_test "T7: axonflow_throttle_active state machine" test_throttle_active_states
 run_test "T8: no stdout bytes" test_no_stdout_bytes
+run_test "T9: HTTP 401 stamps 5-minute throttle (#2275 fix)" test_401_auth_failure_stamps_throttle
+run_test "T10: non-401 statuses not handled (envelope-handler scope guard)" test_non_401_statuses_not_handled
+run_test "T11: 401 prompt suppressed on second hit same day" test_401_prompt_once_per_day
+run_test "T12: 401 path emits no stdout bytes" test_401_no_stdout_bytes
 
 echo
 echo "==============================="

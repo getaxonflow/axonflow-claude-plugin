@@ -22,6 +22,13 @@
 # Functions exported to callers:
 #   axonflow_throttle_active            — exit 0 if throttle deadline still in future
 #   axonflow_handle_envelope_response   — args: <http_code> <body_file> <headers_file>
+#   axonflow_handle_auth_failure        — args: <http_code> <body_file> <headers_file>
+#                                         Detects HTTP 401 and stamps a 5-minute
+#                                         throttle. Prevents the auth-storm
+#                                         retry loop documented in
+#                                         axonflow-enterprise#2275 (716 × 401
+#                                         in 24h from a single source IP when
+#                                         credentials are expired/invalid).
 
 # Guard against multi-source.
 if [ -n "${_AXONFLOW_UPGRADE_PROMPT_LOADED:-}" ]; then
@@ -193,6 +200,57 @@ axonflow_handle_envelope_response() {
     {
       echo "[AxonFlow] ${wording}"
       echo "[AxonFlow] Upgrade: ${buy_url}"
+    } >&2
+  fi
+  return 0
+}
+
+# Cooldown applied when the agent returns HTTP 401 (invalid / expired
+# credentials). Five minutes is short enough that a user who fixes their
+# credentials sees governance resume quickly, but long enough to prevent
+# the tight auth-storm retry loop documented in axonflow-enterprise#2275
+# (716 × 401 in 24h against /api/v1/audit/tool-call from a single source
+# IP — every pre-tool-check + post-tool-audit hook fired a fresh 401
+# because there was no 401-aware back-off path). Caller may override via
+# AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS for testing.
+_AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS="${AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS:-300}"
+
+# axonflow_handle_auth_failure <http_code> <body_file> <headers_file>
+#   Returns 0 iff $http_code == 401. Stamps the throttle-until file with a
+#   5-minute cooldown so subsequent hook fires short-circuit the network
+#   call locally until the operator refreshes their credentials.
+#
+#   Emits a once-per-UTC-day stderr prompt directing the operator to refresh
+#   credentials at the dashboard URL. The prompt is suppressed on second
+#   and subsequent fires the same day (matching the envelope-prompt
+#   behaviour) so the operator's terminal isn't spammed by every hook fire
+#   while the throttle is active.
+#
+#   $body_file and $headers_file are accepted for symmetry with
+#   axonflow_handle_envelope_response but are not parsed — a 401's body
+#   shape is not part of any wire contract this plugin depends on.
+#
+#   Returns 1 for any non-401 status (including 403, 429, 5xx, network
+#   failure represented as empty string). Caller's existing 403/429
+#   envelope handler runs unchanged before/after this function.
+axonflow_handle_auth_failure() {
+  local http_code="$1"
+  # body_file ($2) and headers_file ($3) intentionally unread — accepted
+  # for caller-side argument-shape parity with axonflow_handle_envelope_response.
+
+  if [ "$http_code" != "401" ]; then
+    return 1
+  fi
+
+  _axonflow_ensure_cache_dir
+  local deadline_epoch
+  deadline_epoch=$(($(date -u +%s) + _AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS))
+  echo "$deadline_epoch auth_failure" >"$_AXONFLOW_THROTTLE_FILE" 2>/dev/null
+
+  if _axonflow_should_show_prompt_today; then
+    {
+      echo "[AxonFlow] Authentication failed (HTTP 401) against the AxonFlow agent. Tool governance is paused for 5 minutes."
+      echo "[AxonFlow] Refresh your credentials: https://getaxonflow.com/dashboard"
     } >&2
   fi
   return 0
