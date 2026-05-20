@@ -238,8 +238,22 @@ fi
 # 401 was not envelope-bearing and the existing handler returned 1 for
 # anything other than 429/403, leaving the script to fall through with no
 # back-off).
-if axonflow_handle_auth_failure "$HTTP_CODE" "$PRECHECK_BODY" "$PRECHECK_HEADERS"; then
-  exit 0
+#
+# Carve-out for JSON-RPC -32001: when the response is HTTP 401 AND the body
+# is a JSON-RPC error with `error.code == -32001`, route through the
+# fail-closed (deny) branch below instead of the throttle path. Preserves
+# the pre-#2275 deny semantics for the documented -32001 auth-error contract
+# (issue #1545 Direction 3) — operators with persistent misconfiguration
+# see a deny decision in Claude Code rather than 5 minutes of silent fall-
+# open. -32001 is only emitted by the agent's MCP handler when auth is
+# structurally wrong (bad token, wrong tenant), so the throttle's value
+# (back off from a tight retry loop) doesn't apply and the deny's value
+# (operator sees the failure immediately) does.
+JSONRPC_CODE_FOR_AUTH=$(jq -r '.error.code // empty' "$PRECHECK_BODY" 2>/dev/null)
+if [ "$JSONRPC_CODE_FOR_AUTH" != "-32001" ]; then
+  if axonflow_handle_auth_failure "$HTTP_CODE" "$PRECHECK_BODY" "$PRECHECK_HEADERS"; then
+    exit 0
+  fi
 fi
 
 RESPONSE=$(cat "$PRECHECK_BODY")

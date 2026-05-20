@@ -168,6 +168,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif 'AUTH_ERROR' in statement:
             # JSON-RPC auth error
             resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32001, 'message': 'Authentication failed'}}
+        elif 'HTTP_401_WITH_32001' in statement:
+            # HTTP 401 with a JSON-RPC -32001 body — the documented #2275
+            # follow-up carve-out: the throttle path MUST NOT swallow this
+            # response. The plugin must route through the -32001 fail-closed
+            # deny branch (issue #1545 Direction 3) so the operator sees
+            # the auth failure as a structured deny, not 5 minutes of silent
+            # fall-open.
+            resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32001, 'message': 'Authentication failed'}}
+            self.send_response(401)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(resp).encode())
+            return
+        elif 'HTTP_401_NO_32001' in statement:
+            # HTTP 401 with a non-32001 body shape — the standard #2275
+            # throttle path: plugin stamps `throttle-until` + fires the
+            # once-per-day credential-refresh nudge to stderr + exits 0
+            # (fall-open). This is the auth-storm prevention path.
+            resp = {'error': 'invalid credentials'}
+            self.send_response(401)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(resp).encode())
+            return
         elif 'BLOCKED' in statement:
             # Policy blocks the command
             result_text = json.dumps({'allowed': False, 'block_reason': 'Test policy violation', 'policies_evaluated': 10})
@@ -267,6 +291,61 @@ else
     assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
     assert_contains "Decision is deny" "$OUTPUT" '"deny"'
     assert_contains "Has governance blocked" "$OUTPUT" "governance blocked"
+fi
+
+echo ""
+echo "--- PreToolUse: HTTP 401 + JSON-RPC -32001 → deny (carve-out) ---"
+# Regression guard for the v1.5.1 → v1.5.2 carve-out: the v1.5.1 fix wired
+# axonflow_handle_auth_failure ahead of the JSON-RPC parser, so an HTTP 401
+# whose body carries the documented -32001 envelope would have fallen
+# through the throttle path (exit 0, no deny) — losing the pre-existing
+# fail-closed semantics. The carve-out in pre-tool-check.sh inspects the
+# JSON-RPC code BEFORE calling axonflow_handle_auth_failure and skips the
+# throttle path when code == -32001, so the deny branch fires unchanged.
+#
+# Each invocation gets an isolated XDG_CACHE_HOME so a 401 from a prior
+# test doesn't pre-stamp the throttle file and steal this test's exit
+# path (`axonflow_throttle_active` would short-circuit before reaching
+# either branch).
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    TMP_CACHE_32001=$(mktemp -d -t axonflow-32001.XXXXXX)
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"HTTP_401_WITH_32001 test"}}' | \
+        XDG_CACHE_HOME="$TMP_CACHE_32001" "$PRE_HOOK" 2>/dev/null)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0 (structured deny output)" "0" "$EXIT_CODE"
+    assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
+    assert_contains "Decision is deny (carve-out preserves -32001 semantics)" "$OUTPUT" '"deny"'
+    assert_contains "Has governance blocked" "$OUTPUT" "governance blocked"
+    # Belt-and-suspenders: the throttle file MUST NOT be stamped on the
+    # -32001 carve-out path. If it were, a subsequent (legitimate) call
+    # would be silenced by axonflow_throttle_active.
+    assert_file_not_exists "throttle-until NOT stamped on -32001 carve-out" \
+        "$TMP_CACHE_32001/axonflow/throttle-until"
+    rm -rf "$TMP_CACHE_32001"
+fi
+
+echo ""
+echo "--- PreToolUse: HTTP 401 without -32001 → allow (throttle path) ---"
+# Sibling guard: an HTTP 401 whose body is NOT a -32001 JSON-RPC envelope
+# still routes through axonflow_handle_auth_failure → throttle + fall-open
+# (exit 0, no deny output). Confirms the carve-out's predicate is narrow
+# enough not to swallow the auth-storm prevention path itself.
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    TMP_CACHE_401=$(mktemp -d -t axonflow-401.XXXXXX)
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"HTTP_401_NO_32001 test"}}' | \
+        XDG_CACHE_HOME="$TMP_CACHE_401" "$PRE_HOOK" 2>/dev/null)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0 (fall-open)" "0" "$EXIT_CODE"
+    assert_empty "No deny output (auth-storm throttle path runs)" "$OUTPUT"
+    assert_file_exists "throttle-until IS stamped on plain 401" \
+        "$TMP_CACHE_401/axonflow/throttle-until"
+    rm -rf "$TMP_CACHE_401"
 fi
 
 echo ""

@@ -39,6 +39,15 @@ _AXONFLOW_UPGRADE_PROMPT_LOADED=1
 _AXONFLOW_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/axonflow"
 _AXONFLOW_THROTTLE_FILE="${_AXONFLOW_CACHE_DIR}/throttle-until"
 _AXONFLOW_PROMPT_STAMP="${_AXONFLOW_CACHE_DIR}/upgrade-prompt-last-shown"
+# Separate stamp file for the auth-failure (HTTP 401) nudge so a tier-limit
+# upgrade prompt earlier in the day doesn't suppress a later credential-
+# refresh nudge (and vice versa). They are independent operator concerns;
+# co-locating them on the same once-per-day stamp would silently swallow
+# whichever fires second. Matches the codex-plugin design and the cursor-
+# plugin v1.5.2 follow-up. Regression guard: tests/test-upgrade-prompt.sh
+# T13 pre-stamps `upgrade-prompt-last-shown` then asserts the 401 nudge
+# still fires.
+_AXONFLOW_AUTH_PROMPT_STAMP="${_AXONFLOW_CACHE_DIR}/auth-failure-prompt-last-shown"
 
 _axonflow_ensure_cache_dir() {
   if [ ! -d "$_AXONFLOW_CACHE_DIR" ]; then
@@ -86,6 +95,30 @@ _axonflow_should_show_prompt_today() {
     fi
   fi
   echo "$today" >"$_AXONFLOW_PROMPT_STAMP" 2>/dev/null
+  return 0
+}
+
+# _axonflow_should_show_auth_prompt_today
+#   Returns 0 if today's date stamp is missing on the auth-failure prompt
+#   (so we show the credential-refresh nudge at most once per UTC day).
+#   Kept distinct from the upgrade-prompt stamp so a tier-limit nudge
+#   earlier in the day doesn't suppress a later auth-failure nudge (and
+#   vice versa) — they're independent operator concerns. Pre-1.5.2 used
+#   the shared `_AXONFLOW_PROMPT_STAMP` here, which caused the 401 nudge
+#   to be silently swallowed whenever the envelope handler had fired
+#   earlier the same day (regression for axonflow-enterprise#2275).
+_axonflow_should_show_auth_prompt_today() {
+  _axonflow_ensure_cache_dir
+  local today
+  today=$(date -u +%Y-%m-%d)
+  if [ -f "$_AXONFLOW_AUTH_PROMPT_STAMP" ]; then
+    local last
+    last=$(awk 'NR==1 {print $1}' "$_AXONFLOW_AUTH_PROMPT_STAMP" 2>/dev/null)
+    if [ "$last" = "$today" ]; then
+      return 1
+    fi
+  fi
+  echo "$today" >"$_AXONFLOW_AUTH_PROMPT_STAMP" 2>/dev/null
   return 0
 }
 
@@ -247,7 +280,7 @@ axonflow_handle_auth_failure() {
   deadline_epoch=$(($(date -u +%s) + _AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS))
   echo "$deadline_epoch auth_failure" >"$_AXONFLOW_THROTTLE_FILE" 2>/dev/null
 
-  if _axonflow_should_show_prompt_today; then
+  if _axonflow_should_show_auth_prompt_today; then
     {
       echo "[AxonFlow] Authentication failed (HTTP 401) against the AxonFlow agent. Tool governance is paused for 5 minutes."
       echo "[AxonFlow] Refresh your credentials: https://getaxonflow.com/dashboard"

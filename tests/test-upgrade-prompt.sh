@@ -590,6 +590,104 @@ test_401_no_stdout_bytes() {
 }
 
 # ---------------------------------------------------------------------------
+# Test 13: separate-stamp regression guard (v1.5.2 follow-up to v1.5.1).
+#
+# Pre-1.5.2 the 401 nudge piggy-backed on `_AXONFLOW_PROMPT_STAMP`, which
+# meant a tier-limit upgrade-prompt earlier in the day would silently
+# suppress a later credential-refresh nudge — closing the same auth-storm
+# loop axonflow-enterprise#2275 was meant to prevent (the operator never
+# sees the "refresh your credentials" message because the envelope handler
+# had stamped the shared file an hour ago for a 429).
+#
+# Regression scenario:
+#   1. Pre-stamp `upgrade-prompt-last-shown` with today's UTC date
+#      (simulates an earlier envelope nudge or any prior 401 nudge under
+#      the old design).
+#   2. Call `axonflow_handle_auth_failure 401 ...` (fresh handler invocation
+#      that hasn't yet stamped the auth-failure file).
+#   3. Assert the nudge appears on stderr — the auth-prompt stamp is a
+#      separate file, so the shared envelope stamp must not gate it.
+#
+# Mutation proof: revert _AXONFLOW_AUTH_PROMPT_STAMP back to the shared
+# _AXONFLOW_PROMPT_STAMP path AND `_axonflow_should_show_auth_prompt_today`
+# back to `_axonflow_should_show_prompt_today` — both halves of the fix
+# are needed and this test fails (stderr is empty) if either is reverted.
+# Verified manually 2026-05-20.
+# ---------------------------------------------------------------------------
+test_401_separate_stamp_not_suppressed_by_envelope_stamp() {
+  local cache; cache=$(mk_tmp_cache)
+  trap "rm -rf '$cache'" EXIT
+  export XDG_CACHE_HOME="$cache"
+  unset AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS
+
+  # Pre-stamp the envelope's once-per-day file with today's UTC date,
+  # simulating an earlier upgrade-prompt nudge (or any prior caller of
+  # `_axonflow_should_show_prompt_today`).
+  mkdir -p "$cache/axonflow"
+  local today; today=$(date -u +%Y-%m-%d)
+  echo "$today" >"$cache/axonflow/upgrade-prompt-last-shown"
+
+  local body headers stderr_out
+  body=$(mktemp); echo '{"error":"invalid credentials"}' >"$body"
+  headers=$(mktemp); printf 'HTTP/2 401\r\n' >"$headers"
+  stderr_out=$(mktemp)
+
+  # shellcheck disable=SC1090
+  . "$HELPER"
+
+  axonflow_handle_auth_failure "401" "$body" "$headers" 2>"$stderr_out"
+  local rc=$?
+
+  assert_eq "rc == 0 (401 still detected)" "0" "$rc"
+  # Critical assertion: the credential-refresh nudge MUST fire even though
+  # the envelope's stamp file already carries today's date.
+  assert_contains "401 nudge fires despite pre-stamped upgrade-prompt file" \
+    "$(cat "$stderr_out")" "Authentication failed (HTTP 401)"
+  assert_contains "dashboard link present" \
+    "$(cat "$stderr_out")" "https://getaxonflow.com/dashboard"
+
+  # The auth-failure stamp is now its own file — verify the new file
+  # landed (and the envelope file is unchanged from the pre-stamp).
+  assert_eq "separate auth-prompt stamp file written" "yes" \
+    "$([ -f "$cache/axonflow/auth-failure-prompt-last-shown" ] && echo yes || echo no)"
+  assert_eq "envelope stamp file untouched by auth-failure path" "$today" \
+    "$(awk 'NR==1 {print $1}' "$cache/axonflow/upgrade-prompt-last-shown")"
+
+  rm -f "$body" "$headers" "$stderr_out"
+}
+
+# ---------------------------------------------------------------------------
+# Test 14: inverse cross-stamp isolation — pre-stamping the auth-failure
+# file does NOT suppress an envelope-handler nudge. Belt-and-suspenders
+# guard so a future refactor doesn't accidentally re-share the stamp in
+# the other direction.
+# ---------------------------------------------------------------------------
+test_envelope_not_suppressed_by_auth_stamp() {
+  local cache; cache=$(mk_tmp_cache)
+  trap "rm -rf '$cache'" EXIT
+  export XDG_CACHE_HOME="$cache"
+
+  # Pre-stamp the auth-failure file with today's UTC date.
+  mkdir -p "$cache/axonflow"
+  local today; today=$(date -u +%Y-%m-%d)
+  echo "$today" >"$cache/axonflow/auth-failure-prompt-last-shown"
+
+  local body headers stderr_out
+  body=$(mktemp); mk_body_429_daily_quota >"$body"
+  headers=$(mktemp); mk_headers_429_with_retry_after >"$headers"
+  stderr_out=$(mktemp)
+
+  # shellcheck disable=SC1090
+  . "$HELPER"
+
+  axonflow_handle_envelope_response "429" "$body" "$headers" 2>"$stderr_out"
+  assert_contains "envelope wording fires despite pre-stamped auth-failure file" \
+    "$(cat "$stderr_out")" "Pro raises this to 2,000/day"
+
+  rm -f "$body" "$headers" "$stderr_out"
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 run_test "T1: 429 daily-quota envelope" test_429_daily_quota
@@ -604,6 +702,10 @@ run_test "T9: HTTP 401 stamps 5-minute throttle (#2275 fix)" test_401_auth_failu
 run_test "T10: non-401 statuses not handled (envelope-handler scope guard)" test_non_401_statuses_not_handled
 run_test "T11: 401 prompt suppressed on second hit same day" test_401_prompt_once_per_day
 run_test "T12: 401 path emits no stdout bytes" test_401_no_stdout_bytes
+run_test "T13: 401 nudge fires despite pre-stamped envelope file (#2275 v1.5.2 fix)" \
+  test_401_separate_stamp_not_suppressed_by_envelope_stamp
+run_test "T14: envelope nudge fires despite pre-stamped auth-failure file" \
+  test_envelope_not_suppressed_by_auth_stamp
 
 echo
 echo "==============================="
