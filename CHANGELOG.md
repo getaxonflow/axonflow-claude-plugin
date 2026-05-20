@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-05-20 — Separate auth-failure stamp file + -32001 fail-closed carve-out
+
+### Fixed
+
+- **Auth-failure credential-refresh nudge now uses a separate `~/.cache/axonflow/auth-failure-prompt-last-shown` stamp file** instead of sharing the envelope handler's `upgrade-prompt-last-shown` stamp. Pre-1.5.2, a tier-limit upgrade prompt earlier the same UTC day would silently suppress the credential-refresh nudge (and vice versa) — defeating the operator-visibility goal of the v1.5.1 fix for [axonflow-enterprise#2275](https://github.com/getaxonflow/axonflow-enterprise/issues/2275). The throttle file itself (`throttle-until`) was always written correctly; only the stderr nudge was suppressed.
+- **HTTP 401 with a JSON-RPC `-32001` error body now routes through the fail-closed deny branch** in `pre-tool-check.sh` instead of the auth-storm throttle path. The v1.5.1 wiring placed `axonflow_handle_auth_failure` ahead of the JSON-RPC parser, which caused the documented `-32001` deny semantics ([issue #1545](https://github.com/getaxonflow/axonflow-enterprise/issues/1545) Direction 3) to regress on the narrow intersection where the agent emits both an HTTP 401 status and a `-32001` body — operators with structurally wrong credentials saw 5 minutes of silent fall-open instead of a deny decision they could act on. The carve-out inspects the body's JSON-RPC code BEFORE calling the throttle handler and skips it when code == `-32001`, preserving the deny path unchanged. Plain HTTP 401s (non-`-32001` body shape) still route through the throttle handler, so the v1.5.1 auth-storm prevention path is intact for the documented 716×401-in-24h scenario.
+
 ## [1.5.1] - 2026-05-20 — Throttle on HTTP 401 to prevent auth-storm retry loops
 
 ### Fixed
