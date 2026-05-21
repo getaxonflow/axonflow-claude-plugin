@@ -204,6 +204,18 @@ if [ -f "$WORK_DIR/_pings.jsonl" ]; then
   else
     fail "ping deployment_mode=$COLD_MODE (expected self_hosted)"
   fi
+  # v9.1 (#2277): plugin telemetry includes org_id, sourced from the
+  # registration file's tenant_id. In this harness the registration
+  # cycle ran above and stored a cs_<uuid> at REG_FILE — assert the
+  # captured ping body carries that exact value.
+  COLD_ORG_ID=$(jq -r '.org_id' "$WORK_DIR/_pings.jsonl" | head -1)
+  if [ -n "$COLD_ORG_ID" ] && [ "$COLD_ORG_ID" = "$REG_TENANT" ]; then
+    pass "ping org_id matches registered tenant_id ($COLD_ORG_ID)"
+  elif [ "$COLD_ORG_ID" = "local-dev-org" ]; then
+    fail "ping org_id is sentinel local-dev-org; expected the cs_<uuid> from registration"
+  else
+    fail "ping org_id=$COLD_ORG_ID (expected cs_<uuid> from registration, got registered=$REG_TENANT)"
+  fi
 fi
 
 # Assertion 6: telemetry stamp file written, mode 0600.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Anonymous telemetry heartbeat — fires at most once every 7 days per machine.
+# Telemetry heartbeat — fires at most once every 7 days per machine.
 #
 # Sends a POST to checkpoint.getaxonflow.com/v1/ping with plugin version,
 # platform info (OS, arch, bash version), and AxonFlow platform version.
@@ -237,6 +237,20 @@ if [ -f "$HOOKS_FILE" ]; then
   HOOK_COUNT=$(jq '[.hooks[][]] | length' "$HOOKS_FILE" 2>/dev/null || echo "0")
 fi
 
+# v9.1 deployment-organization identifier (#2277). Two sources, precedence
+# order: ORG_ID env (operator-supplied on self-hosted) → tenant_id from
+# ~/.config/axonflow/try-registration.json (Community SaaS cs_<uuid>) →
+# "local-dev-org" sentinel. Always emitted.
+REGISTRATION_FILE="${HOME}/.config/axonflow/try-registration.json"
+if [ -n "${ORG_ID:-}" ]; then
+  ORG_ID_VALUE="$ORG_ID"
+elif [ -f "$REGISTRATION_FILE" ]; then
+  ORG_ID_VALUE=$(jq -r '.tenant_id // empty' "$REGISTRATION_FILE" 2>/dev/null)
+  [ -z "$ORG_ID_VALUE" ] && ORG_ID_VALUE="local-dev-org"
+else
+  ORG_ID_VALUE="local-dev-org"
+fi
+
 PAYLOAD=$(jq -n \
   --arg telemetry_type "plugin" \
   --arg sdk "claude-code-plugin" \
@@ -247,6 +261,7 @@ PAYLOAD=$(jq -n \
   --arg deployment_mode "$DEPLOYMENT_MODE" \
   --arg endpoint_type "$ENDPOINT_TYPE" \
   --arg instance_id "$INSTANCE_ID" \
+  --arg org_id "$ORG_ID_VALUE" \
   --argjson hook_count "$HOOK_COUNT" \
   --argjson platform_version "$PLATFORM_VERSION" \
   '{
@@ -260,7 +275,8 @@ PAYLOAD=$(jq -n \
     deployment_mode: $deployment_mode,
     endpoint_type: $endpoint_type,
     features: ["hooks:\($hook_count)"],
-    instance_id: $instance_id
+    instance_id: $instance_id,
+    org_id: $org_id
   }' 2>/dev/null)
 
 if [ -z "$PAYLOAD" ]; then
