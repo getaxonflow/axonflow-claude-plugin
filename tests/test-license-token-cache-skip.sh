@@ -1,16 +1,25 @@
 #!/usr/bin/env bash
-# Regression test: resolve_license_token cache-skip logic per ADR-048.
+# Regression test: resolve_license_token + license_token_endpoint_compatible
+# per ADR-048 + ADR-050.
 #
-# Covers four cases:
-#  A) Community-saas mode (AXONFLOW_ENDPOINT unset)        → cache LOADED
-#  B) Community-saas mode (AXONFLOW_ENDPOINT=try.getaxonflow.com) → cache LOADED
-#  C) Self-hosted with localhost endpoint                  → cache SKIPPED
-#  D) AXONFLOW_LICENSE_TOKEN env wins regardless of mode   → env wins
+# Two responsibilities, two surfaces:
+#  - resolve_license_token: always loads the on-disk cache as a fallback so
+#    operators / tests get a deterministic "is there a token at all?" signal.
+#  - license_token_endpoint_compatible: returns true unless the cached token's
+#    aud claim is community_saas_plugin AND AXONFLOW_ENDPOINT is set to a
+#    non-try.getaxonflow.com host. That's the only combination where sending
+#    the token to the platform would 401 silently.
 #
-# The bug: prior fix (commit 0f6ade6) used AXONFLOW_AUTH presence as
-# the discriminator, but community-saas-bootstrap.sh sets AXONFLOW_AUTH
-# on every first-run, so community-saas Pro users would have lost
-# their X-License-Token. This test asserts the corrected discriminator.
+# Earlier iterations of the fix that didn't survive hostile review:
+#  - commit 0f6ade6: skipped cache when AXONFLOW_AUTH was set →
+#    community-saas-bootstrap.sh sets AXONFLOW_AUTH on every first-run,
+#    so a Pro user on community-saas lost their X-License-Token.
+#  - commit 79be132: skipped cache when AXONFLOW_ENDPOINT was a non-
+#    try.getaxonflow.com host → broke tests/host-cli-shim's Pro/file
+#    scenario (legitimately uses a localhost shim endpoint + file token).
+#
+# Now: cache loads unconditionally; aud↔endpoint compat is checked
+# in license_token_endpoint_compatible and consumed by mcp-auth-headers.sh.
 
 set -uo pipefail
 
@@ -62,28 +71,67 @@ source_under_test() {
   )
 }
 
-# Case A — community-saas (no endpoint, no auth): cache loads.
+# A second source_under_test that returns the compat verdict instead of the
+# token value, so we can assert both surfaces.
+compat_under_test() {
+  unset AXONFLOW_LICENSE_TOKEN AXONFLOW_ENDPOINT AXONFLOW_AUTH
+  for kv in "$@"; do
+    eval "export $kv"
+  done
+  (
+    LICENSE_TOKEN_CONFIG_DIR="$XDG_CONFIG_HOME/axonflow"
+    LICENSE_TOKEN_FILE="$LICENSE_TOKEN_CONFIG_DIR/license-token.json"
+    source "$PLUGIN_ROOT/scripts/license-token.sh"
+    resolve_license_token
+    if license_token_endpoint_compatible; then echo "compat"; else echo "incompat"; fi
+  )
+}
+
+echo "--- resolve_license_token: cache always loads (signal layer) ---"
+
+# A — community-saas (no endpoint): cache loads.
 RESULT=$(source_under_test)
-assert "A community-saas (no endpoint)" "$RESULT" "$CACHED_TOKEN"
+assert "A community-saas (no endpoint) loads cache" "$RESULT" "$CACHED_TOKEN"
 
-# Case B — community-saas with explicit SaaS endpoint: cache loads.
+# B — community-saas with SaaS endpoint: cache loads.
 RESULT=$(source_under_test AXONFLOW_ENDPOINT="https://try.getaxonflow.com")
-assert "B community-saas (try.getaxonflow.com endpoint)" "$RESULT" "$CACHED_TOKEN"
+assert "B community-saas (try.getaxonflow.com endpoint) loads cache" "$RESULT" "$CACHED_TOKEN"
 
-# Case C — self-hosted endpoint: cache is SKIPPED.
+# C — self-hosted endpoint: cache STILL loads (we deal with it at compat layer).
 RESULT=$(source_under_test AXONFLOW_ENDPOINT="http://localhost:8080")
-assert "C self-hosted (localhost:8080)" "$RESULT" ""
+assert "C self-hosted (localhost:8080) loads cache (compat layer handles drop)" "$RESULT" "$CACHED_TOKEN"
 
-# Case C2 — even with AXONFLOW_AUTH set (community-saas bootstrap shape),
-# cache should LOAD as long as endpoint is community-saas (or empty).
-# This is the regression the hostile-review fix narrowed.
+# C2 — community-saas with AXONFLOW_AUTH set: cache loads (regression case).
 RESULT=$(source_under_test AXONFLOW_AUTH="Basic Y3NfdGVzdDpkdW1teQ==")
-assert "C2 community-saas with AUTH set (the regression case)" "$RESULT" "$CACHED_TOKEN"
+assert "C2 community-saas with AUTH set loads cache" "$RESULT" "$CACHED_TOKEN"
 
-# Case D — env var wins regardless of mode.
+# D — env var wins regardless.
 RESULT=$(source_under_test AXONFLOW_LICENSE_TOKEN="$ENV_TOKEN" AXONFLOW_ENDPOINT="http://localhost:8080")
 assert "D env-set token wins on self-hosted endpoint" "$RESULT" "$ENV_TOKEN"
 
 echo
-echo "=== license-token cache-skip regression: $PASS passed, $FAIL failed ==="
+echo "--- license_token_endpoint_compatible: per-request drop layer ---"
+
+# E — community-saas-aud cached token + community-saas endpoint: compat.
+RESULT=$(compat_under_test AXONFLOW_ENDPOINT="https://try.getaxonflow.com")
+assert "E community-saas-aud token + try.getaxonflow.com" "$RESULT" "compat"
+
+# F — community-saas-aud cached token + self-hosted endpoint: INCOMPAT (the actual leak protection).
+RESULT=$(compat_under_test AXONFLOW_ENDPOINT="http://localhost:8080")
+assert "F community-saas-aud token + self-hosted endpoint = incompat" "$RESULT" "incompat"
+
+# G — no endpoint set: defaults to compat (community-saas is the default deployment).
+RESULT=$(compat_under_test)
+assert "G no endpoint defaults to compat" "$RESULT" "compat"
+
+# H — env-set token with self_hosted aud should be compatible on self-hosted endpoint.
+# Build a minimal AXON- token with aud=axonflow.self_hosted.full
+SELF_HOSTED_PAYLOAD='{"tier":"Enterprise","aud":"axonflow.self_hosted.full","issued_at":"20260101","expires_at":"21260101"}'
+SELF_HOSTED_B64=$(echo -n "$SELF_HOSTED_PAYLOAD" | python3 -c "import sys,base64;sys.stdout.write(base64.urlsafe_b64encode(sys.stdin.read().encode()).decode().rstrip('='))")
+SELF_HOSTED_TOKEN="AXON-${SELF_HOSTED_B64}.AAAA"
+RESULT=$(compat_under_test AXONFLOW_LICENSE_TOKEN="$SELF_HOSTED_TOKEN" AXONFLOW_ENDPOINT="http://localhost:8080")
+assert "H self-hosted-aud token + self-hosted endpoint = compat" "$RESULT" "compat"
+
+echo
+echo "=== license-token cache-skip + endpoint-compat regression: $PASS passed, $FAIL failed ==="
 [ "$FAIL" -eq 0 ]
