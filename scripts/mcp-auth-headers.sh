@@ -45,6 +45,16 @@ AUTH="${AXONFLOW_AUTH:-}"
 LICENSE_TOKEN="${AXONFLOW_LICENSE_TOKEN:-}"
 CLIENT_HEADER="${AXONFLOW_CLIENT_HEADER}"
 
+# Cross-deployment safety: drop X-License-Token when the cached token
+# is a community-saas-issued (aud=community_saas_plugin) but the user
+# has pointed AXONFLOW_ENDPOINT at a non-try.getaxonflow.com host.
+# Otherwise the self-hosted v9 platform would receive a token signed
+# with the community-saas Ed25519 key it can't verify and silently
+# fail MCP auth with HTTP 401. See license-token.sh comment block.
+if [ -n "$LICENSE_TOKEN" ] && ! license_token_endpoint_compatible; then
+  LICENSE_TOKEN=""
+fi
+
 # Build the JSON header object via jq when available so token values are
 # json-escaped correctly. Without jq, fall back to a bare Authorization +
 # X-Axonflow-Client shape (X-License-Token would need careful escaping so

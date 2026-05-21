@@ -91,6 +91,30 @@ load_license_token_from_file() {
 
 # Resolve the token: env wins, file is the fallback. Side-effect-only:
 # leaves AXONFLOW_LICENSE_TOKEN exported (or unset) when it returns.
+#
+# The on-disk cache is loaded unconditionally. The downstream
+# safety check (skip-when-aud-and-endpoint-mismatch) lives in
+# license_token_endpoint_compatible — it inspects the cached token's
+# aud claim and the current AXONFLOW_ENDPOINT to decide whether to
+# emit X-License-Token on the wire. That keeps resolve_license_token
+# focused on "is there a token at all?" and gives the headers helper
+# (and tests of it) a clean signal it can override per-request.
+#
+# Earlier iterations of the fix:
+#  - commit 0f6ade6 — skipped cache when AXONFLOW_AUTH was set. Too
+#    broad: community-saas-bootstrap.sh exports AXONFLOW_AUTH on every
+#    community-saas first-run, so a Pro user on community-saas lost
+#    their X-License-Token header.
+#  - commit 79be132 — skipped cache when AXONFLOW_ENDPOINT was set to
+#    a non-try.getaxonflow.com host. Broke the host-cli-shim's
+#    Pro/file scenario which legitimately uses a localhost shim
+#    endpoint AND expects the file-token to load.
+#
+# Current fix: cache always loads (so tests + opt-in operators work);
+# aud↔endpoint mismatch is detected in license_token_endpoint_compatible
+# and the headers helper drops X-License-Token when incompatible.
+#
+# Caught during v9 preflight 2026-05-21.
 resolve_license_token() {
   if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
     if license_token_looks_valid "$AXONFLOW_LICENSE_TOKEN"; then
@@ -102,6 +126,57 @@ resolve_license_token() {
     unset AXONFLOW_LICENSE_TOKEN
   fi
   load_license_token_from_file "$LICENSE_TOKEN_FILE" >/dev/null 2>&1 || true
+}
+
+# license_token_endpoint_compatible — returns 0 (true) if the cached
+# AXONFLOW_LICENSE_TOKEN's aud claim is consistent with the current
+# AXONFLOW_ENDPOINT, 1 (false) otherwise.
+#
+# The aud values minted by the platform (ADR-050):
+#   - axonflow.self_hosted.{plugin,sdk,full} → self-hosted licenses,
+#     valid against any endpoint
+#   - community_saas_plugin → Plugin Pro v1 token, ONLY valid when
+#     sent to try.getaxonflow.com (community-saas signing key)
+#
+# So the only incompatible case is: aud=community_saas_plugin sent to
+# a non-try.getaxonflow.com endpoint. That's the stale-token-leak
+# we're protecting against.
+#
+# Token not set, malformed, or aud missing: treat as compatible
+# (no-op skip). The downstream platform will reject anything invalid.
+license_token_endpoint_compatible() {
+  local tok="${AXONFLOW_LICENSE_TOKEN:-}"
+  [ -z "$tok" ] && return 0
+
+  # Endpoint not set, or pointing at community-saas SaaS → compatible.
+  local endpoint="${AXONFLOW_ENDPOINT:-}"
+  if [ -z "$endpoint" ] || [[ "$endpoint" == *try.getaxonflow.com* ]]; then
+    return 0
+  fi
+
+  # Endpoint is self-hosted. Check the token's aud — only fail if
+  # it's community_saas_plugin. Other auds (self_hosted.*) are fine.
+  local payload_b64="${tok#AXON-}"
+  payload_b64="${payload_b64%%.*}"
+  # Decode base64url (no padding) → JSON
+  local aud
+  aud=$(printf '%s' "$payload_b64" | python3 -c "
+import sys, base64, json
+b = sys.stdin.read()
+b += '=' * (-len(b) % 4)
+try:
+  print(json.loads(base64.urlsafe_b64decode(b)).get('aud', ''))
+except Exception:
+  pass
+" 2>/dev/null)
+  case "$aud" in
+    community_saas_plugin)
+      return 1  # incompatible
+      ;;
+    *)
+      return 0
+      ;;
+  esac
 }
 
 # Helper to atomically write the on-disk token file with 0600 perms.
