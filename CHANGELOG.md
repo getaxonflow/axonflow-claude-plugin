@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`org_id` field in the telemetry heartbeat body (v9.1 preflight, [axonflow-enterprise#2277](https://github.com/getaxonflow/axonflow-enterprise/issues/2277)).** Brings the Claude Code plugin's telemetry up to parity with the platform's `startup_telemetry.go` emitter — every heartbeat now identifies which deployment-organization emitted it. Three sources in precedence order:
+  1. The `ORG_ID` env var when set (the operator's explicit configuration on self-hosted-style deployments, or a forced override).
+  2. The `tenant_id` from `~/.config/axonflow/try-registration.json` (the `cs_<uuid>` Community SaaS tenant identifier).
+  3. The `local-dev-org` sentinel when neither is configured.
+
+  Always emitted on the wire. Receiver-side at `ee/platform/checkpoint-service/pkg/telemetry/telemetry.go:454` already accepts the field with `omitempty` for backward compat. Honors `AXONFLOW_TELEMETRY=off` like every other heartbeat field. See [axonflow-landing privacy.html](https://getaxonflow.com/privacy/) for the customer-facing commitment that covers this field.
+
+  Locked in by a new assertion in the canonical wire-shape harness at `tests/heartbeat-real-stack/run_real_stack.sh`: the captured ping body's `org_id` field MUST match the `cs_<uuid>` tenant_id from the registration file. Mutation-tested: stripping the `org_id: $org_id` line from `scripts/telemetry-ping.sh`'s jq payload makes the assertion fail with `ping org_id=null`.
+
+### Changed
+
+- **`scripts/telemetry-ping.sh` header comment** softened from "Anonymous telemetry heartbeat" to "Telemetry heartbeat" alongside the v9.1 `org_id` addition — the operator-supplied `ORG_ID` on self-hosted-style deployments is not anonymized; only the `instance_id` and the `cs_<uuid>` Community SaaS identifier remain anonymous-by-design.
+
 ## [1.5.2] - 2026-05-20 — Separate auth-failure stamp file + -32001 fail-closed carve-out
 
 ### Fixed
