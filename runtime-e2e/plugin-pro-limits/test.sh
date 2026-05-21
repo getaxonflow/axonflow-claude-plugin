@@ -24,6 +24,21 @@ if ! curl -sSf -o /dev/null --max-time 5 "$ENDPOINT/health"; then
   exit 0
 fi
 
+# The MaxActiveCustomPolicies cap + V1 upgrade envelope are community-saas-only
+# (v1_pro_graduated_freemium capability). The entry point /api/v1/register is
+# routed only when DEPLOYMENT_MODE=community-saas (i.e. the overlay
+# docker-compose.community-saas.yml is layered on the base compose), not on
+# plain community mode and not on enterprise. Probe the register endpoint
+# directly with a benign POST so we don't get a misleading "register did
+# not return creds" downstream when the overlay isn't active.
+PROBE_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$ENDPOINT/api/v1/register" \
+  -H "Content-Type: application/json" -d '{"label":"plugin-pro-probe-noop"}' 2>/dev/null)
+if [ "$PROBE_STATUS" = "404" ]; then
+  echo "SKIP: /api/v1/register returned 404 — this stack is not community-saas mode"
+  echo "      Bring up with: docker compose -f docker-compose.yml -f docker-compose.community-saas.yml up -d"
+  exit 0
+fi
+
 REG_LABEL="plugin-pro-cap-mcp-$(date +%s)-$RANDOM"
 REG=$(curl -s -X POST "$ENDPOINT/api/v1/register" \
   -H "Content-Type: application/json" \

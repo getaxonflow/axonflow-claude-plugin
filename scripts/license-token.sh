@@ -92,15 +92,29 @@ load_license_token_from_file() {
 # Resolve the token: env wins, file is the fallback. Side-effect-only:
 # leaves AXONFLOW_LICENSE_TOKEN exported (or unset) when it returns.
 #
-# Self-hosted deployments (AXONFLOW_AUTH set with an explicit Basic
-# credential) MUST NOT fall back to the on-disk cache, because the
-# cached token was minted for try.getaxonflow.com (community-saas)
-# with the community-saas signing key, and a self-hosted v9 platform
-# rejects it with HTTP 401 — silently breaking the MCP-server
-# connection. Env-set tokens are still honored (operator opt-in).
-# Caught during v9 preflight 2026-05-21 — claude --plugin-dir
-# governance-lifecycle test only passed AFTER moving the stale
-# license-token.json out of the way.
+# Self-hosted deployments MUST NOT fall back to the on-disk cache: the
+# cached token was minted for try.getaxonflow.com (community-saas) with
+# the community-saas signing key, and a self-hosted v9 platform rejects
+# it with HTTP 401 — silently breaking the MCP-server connection.
+# Env-set tokens are still honored (operator opt-in).
+#
+# Discriminator: when AXONFLOW_ENDPOINT is set AND it doesn't point at
+# the community-saas SaaS hostname (try.getaxonflow.com), the user has
+# explicitly opted into a non-community-saas deployment and the cache
+# is meaningless to them. community-saas users (no endpoint set OR
+# endpoint = try.getaxonflow.com) still get their cached Pro token
+# loaded — they're the whole reason the cache exists.
+#
+# Earlier versions of this fix used AXONFLOW_AUTH presence as the
+# discriminator (commit 0f6ade6), but that was too broad:
+# community-saas-bootstrap.sh exports AXONFLOW_AUTH on every
+# community-saas first-run as part of the bootstrap dance, so a Pro
+# user on community-saas would have lost their X-License-Token header
+# every time.
+#
+# Caught during v9 preflight 2026-05-21 (initial fix); hostile review
+# 2026-05-21 surfaced the community-saas-bootstrap regression and
+# narrowed the discriminator.
 resolve_license_token() {
   if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
     if license_token_looks_valid "$AXONFLOW_LICENSE_TOKEN"; then
@@ -111,9 +125,9 @@ resolve_license_token() {
     echo "[AxonFlow] AXONFLOW_LICENSE_TOKEN is set but does not look like a valid AXON- token; ignoring" >&2
     unset AXONFLOW_LICENSE_TOKEN
   fi
-  # Skip file-cache fallback for self-hosted: cached tokens are
-  # community-saas-issued and the local platform can't validate them.
-  if [ -n "${AXONFLOW_AUTH:-}" ]; then
+  # Skip the cache fallback only for self-hosted deployments: explicit
+  # AXONFLOW_ENDPOINT NOT pointing at the community-saas SaaS host.
+  if [ -n "${AXONFLOW_ENDPOINT:-}" ] && [[ "$AXONFLOW_ENDPOINT" != *try.getaxonflow.com* ]]; then
     return 0
   fi
   load_license_token_from_file "$LICENSE_TOKEN_FILE" >/dev/null 2>&1 || true
