@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-05-20 — Separate auth-failure stamp file + JSON-RPC auth-error fail-closed carve-out + license-token cache-skip + `org_id` in telemetry heartbeat
+
 ### Added
 
 - **`org_id` field in the telemetry heartbeat body.** Brings the Claude
@@ -19,38 +21,6 @@
   heartbeat field. See
   [getaxonflow.com/privacy/](https://getaxonflow.com/privacy/) for the
   customer-facing commitment that covers this field.
-
-### Fixed
-
-- **MCP server no longer fails to register when a self-hosted
-  `AXONFLOW_AUTH` credential is paired with a stale on-disk Pro
-  license token.** Previously, `resolve_license_token` always loaded
-  `~/.config/axonflow/license-token.json` on top of any explicit
-  `AXONFLOW_AUTH` credential the user had set for a self-hosted v9
-  deployment. The plugin then emitted both an `X-License-Token` header
-  (signed by Community SaaS) and Basic auth (a self-hosted credential
-  the local platform expects) — the self-hosted platform could not
-  validate the foreign-signed token, so the MCP server connection
-  failed silently at auth. Symptom: `claude --plugin-dir` reported
-  `mcp_servers: [{name: plugin:axonflow:axonflow, status: failed}]`
-  and the spawned agent had no axonflow tools registered. When
-  `AXONFLOW_AUTH` is set, the plugin no longer falls back to the
-  on-disk cache. Operators can still opt in explicitly by exporting
-  `AXONFLOW_LICENSE_TOKEN` (that path is unchanged).
-
-### Changed
-
-- **`scripts/telemetry-ping.sh` header comment** softened from "Anonymous
-  telemetry heartbeat" to "Telemetry heartbeat" alongside the `org_id`
-  addition — the operator-supplied `ORG_ID` on self-hosted-style
-  deployments is not anonymized; only the `instance_id` and the
-  `cs_<uuid>` Community SaaS identifier remain anonymous-by-design.
-
-### Tracking
-
-- [#2277](https://github.com/getaxonflow/axonflow-enterprise/issues/2277)
-
-## [1.5.2] - 2026-05-20 — Separate auth-failure stamp file + `-32001` fail-closed carve-out
 
 ### Fixed
 
@@ -75,11 +45,29 @@
   handler and skips it when code == `-32001`. Plain HTTP 401s
   (non-`-32001` body shape) still route through the throttle handler,
   so the v1.5.1 auth-storm prevention path is intact.
+- **MCP server no longer fails to register when a self-hosted
+  `AXONFLOW_AUTH` credential is paired with a stale on-disk Pro
+  license token.** Previously, `resolve_license_token` always loaded
+  `~/.config/axonflow/license-token.json` on top of any explicit
+  `AXONFLOW_AUTH` credential the user had set for a self-hosted v9
+  deployment. The plugin then emitted both an `X-License-Token` header
+  (signed by Community SaaS) and Basic auth (a self-hosted credential
+  the local platform expects) — the self-hosted platform could not
+  validate the foreign-signed token, so the MCP server connection
+  failed silently at auth. Symptom: `claude --plugin-dir` reported
+  `mcp_servers: [{name: plugin:axonflow:axonflow, status: failed}]`
+  and the spawned agent had no axonflow tools registered. When
+  `AXONFLOW_AUTH` is set, the plugin no longer falls back to the
+  on-disk cache. Operators can still opt in explicitly by exporting
+  `AXONFLOW_LICENSE_TOKEN` (that path is unchanged).
 
-### Tracking
+### Changed
 
-- [#2275](https://github.com/getaxonflow/axonflow-enterprise/issues/2275)
-- [#1545](https://github.com/getaxonflow/axonflow-enterprise/issues/1545)
+- **`scripts/telemetry-ping.sh` header comment** softened from "Anonymous
+  telemetry heartbeat" to "Telemetry heartbeat" alongside the `org_id`
+  addition — the operator-supplied `ORG_ID` on self-hosted-style
+  deployments is not anonymized; only the `instance_id` and the
+  `cs_<uuid>` Community SaaS identifier remain anonymous-by-design.
 
 ## [1.5.1] - 2026-05-20 — Throttle on HTTP 401 to prevent auth-storm retry loops
 
@@ -101,10 +89,6 @@
   deadline passes — refreshing credentials before the cooldown expires
   has no penalty, the next governed call simply re-stamps if the new
   credentials are also rejected.
-
-### Tracking
-
-- [#2275](https://github.com/getaxonflow/axonflow-enterprise/issues/2275)
 
 ## [1.5.0] - 2026-05-19 — Terminology: `tenant_id` → `client_id` in user-facing output
 
@@ -137,10 +121,6 @@
   terminology consistently. The "Activate Pro tier" walkthrough notes
   that Stripe Checkout's custom field is still labeled "AxonFlow
   tenant ID" until that form is updated separately.
-
-### Tracking
-
-- [#2230](https://github.com/getaxonflow/axonflow-enterprise/issues/2230)
 
 ## [1.4.0] - 2026-05-09 — Decision History API + policy_version recorded on every decision + telemetry simplification
 
