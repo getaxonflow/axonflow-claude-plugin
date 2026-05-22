@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-## [1.5.2] - 2026-05-20 — Separate auth-failure stamp file + JSON-RPC auth-error fail-closed carve-out + license-token cache-skip + `org_id` in telemetry heartbeat
+## [1.5.2] - 2026-05-22 — Separate auth-failure stamp file + JSON-RPC auth-error fail-closed carve-out + license-token cache-skip + `org_id` in telemetry heartbeat
 
 ### Added
 
