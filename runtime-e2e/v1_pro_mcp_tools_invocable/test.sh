@@ -45,12 +45,17 @@ export AXONFLOW_ENDPOINT="$AGENT_URL"
 
 runtime_e2e_skip_if_unavailable
 
-# CLAUDE_PLUGIN_ROOT is required by the plugin's `.mcp.json` headersHelper
-# path interpolation (`${CLAUDE_PLUGIN_ROOT}/scripts/mcp-auth-headers.sh`).
-# Claude Code 2.1.132 does NOT auto-populate this variable when reading
-# the plugin's MCP config from `--plugin-dir`, so the helper resolves to
-# `/scripts/...` (a non-existent absolute path) and the MCP server fails
-# to connect. Set it explicitly here to the plugin root.
+# HISTORICAL WORKAROUND (now redundant, kept harmless): the plugin's
+# `.mcp.json` headersHelper USED to be `${CLAUDE_PLUGIN_ROOT}/scripts/
+# mcp-auth-headers.sh`. Claude Code does NOT expand ${CLAUDE_PLUGIN_ROOT} in
+# the headersHelper field, so the helper resolved to `/scripts/...` (a
+# non-existent path), never ran, and the MCP server failed to connect — but
+# THIS TEST MASKED THE BUG by exporting CLAUDE_PLUGIN_ROOT, something real
+# users never do. `.mcp.json` now inlines a path-independent resolver, so the
+# export below is no longer required for the MCP connection; it is retained
+# only because the inline ignores it. The real connect/deny behavior is now
+# asserted by runtime-e2e/self-hosted-enterprise-auth/ and
+# tests/test-mcp-headers.sh.
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
 # Hermetic license-token isolation:

@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Generate auth headers for the AxonFlow MCP server connection.
-# Called by Claude Code's headersHelper at MCP session start.
+#
+# NOTE (claude#56 follow-up): this script is NO LONGER referenced by
+# `.mcp.json`'s `headersHelper`. Claude Code does not expand
+# `${CLAUDE_PLUGIN_ROOT}` (or any env var) in the `headersHelper` field — only
+# in command/args/env/url/headers — so pointing headersHelper at
+# `${CLAUDE_PLUGIN_ROOT}/scripts/mcp-auth-headers.sh` resolved to a bad path,
+# the helper never ran, and the MCP connection collapsed into OAuth discovery
+# + the agent's plaintext "404 page not found". `.mcp.json` now inlines a
+# self-contained, path-independent resolver that implements the SAME contract
+# as this script. This file is retained as the readable reference impl and as
+# the header-forwarding target for tests/host-cli-shim; keep the two in sync —
+# tests/test-mcp-headers.sh pins the inline's behavior.
 #
 # Resolution order (ADR-048):
 #   1. AXONFLOW_AUTH already exported by the user → use it (self-hosted /

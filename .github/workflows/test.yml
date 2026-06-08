@@ -55,6 +55,11 @@ jobs:
           chmod +x tests/test-status-client-id-label.sh
           ./tests/test-status-client-id-label.sh
 
+      - name: Run .mcp.json headersHelper unit test (auth-header regression)
+        run: |
+          chmod +x tests/test-mcp-headers.sh
+          ./tests/test-mcp-headers.sh
+
       - name: Validate plugin structure
         run: |
           # Required files must exist

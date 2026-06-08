@@ -20,8 +20,9 @@
 #      bootstrap — emits a header set that includes X-License-Token when a
 #      Pro license is present, plus X-Axonflow-Client on every tier. The
 #      pre-existing inline-bash headersHelper used to drop X-License-Token
-#      (claude#56). The .mcp.json now points at scripts/mcp-auth-headers.sh
-#      so the helper runs the same code path the per-call hooks do.
+#      (claude#56). The .mcp.json now INLINES a self-contained header resolver
+#      directly in the headersHelper field (Claude Code does not expand
+#      ${CLAUDE_PLUGIN_ROOT} there); this shim extracts and runs that inline.
 #   4. Free-tier scenario: NO captured request carries X-License-Token.
 #   5. PreToolUse deny path: when the policy stub answers `allowed=false`,
 #      the hook output JSON includes `permissionDecision=deny` AND a follow-
@@ -251,7 +252,13 @@ else
 fi
 
 # ADR-050 §4: headersHelper also includes X-Axonflow-Client on Free tier.
-if echo "$HEADERS_FREE" | jq -e '."X-Axonflow-Client" | startswith("claude-code-plugin/")' >/dev/null 2>&1; then
+# The MCP-connection headersHelper is now inlined in .mcp.json (Claude Code
+# does not expand ${CLAUDE_PLUGIN_ROOT} there) and is path-independent, so it
+# emits the bare client id "claude-code-plugin" without the "/<version>"
+# suffix (it can't read plugin.json). The agent derives scope from the client
+# prefix and accepts this (verified against a live in-vpc-enterprise agent).
+# The per-call hooks still send the versioned form via client-header.sh.
+if echo "$HEADERS_FREE" | jq -e '."X-Axonflow-Client" | startswith("claude-code-plugin")' >/dev/null 2>&1; then
   pass "Free: headersHelper includes X-Axonflow-Client"
 else
   fail "Free: headersHelper missing X-Axonflow-Client: $HEADERS_FREE"
@@ -287,9 +294,9 @@ TOKEN_OBSERVED=$(jq -s -r '.[0].headers["x-license-token"] // empty' "$CAPTURE_F
 [ "$TOKEN_OBSERVED" = "$LICENSE_TOKEN" ] && pass "Pro/env: captured token value matches AXONFLOW_LICENSE_TOKEN" \
   || fail "Pro/env: captured token '$TOKEN_OBSERVED' != env '$LICENSE_TOKEN'"
 
-# headersHelper assertion for MCP path. .mcp.json points at
-# scripts/mcp-auth-headers.sh which runs the same code path as per-call
-# hooks, so X-License-Token is forwarded the same way on the MCP session.
+# headersHelper assertion for MCP path. .mcp.json inlines a self-contained
+# header resolver that forwards X-License-Token the same way the per-call hooks
+# do, so it ships on the MCP session too.
 HEADERS_PRO=$(invoke_headers_helper)
 if echo "$HEADERS_PRO" | jq -e --arg t "$LICENSE_TOKEN" '."X-License-Token" == $t' >/dev/null 2>&1; then
   pass "Pro/env: headersHelper forwards X-License-Token"
