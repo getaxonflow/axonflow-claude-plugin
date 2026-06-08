@@ -357,7 +357,30 @@ else
     assert_eq "Exit code is 0" "0" "$EXIT_CODE"
     assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
     assert_contains "Decision is deny" "$OUTPUT" '"deny"'
-    assert_contains "Has governance blocked" "$OUTPUT" "governance blocked"
+    # v1.5.3: the -32001 deny reason is now actionable — it names the exact env
+    # vars to set and states the fail-closed posture (not the old generic
+    # "governance blocked / Fix AxonFlow configuration").
+    assert_contains "Names AXONFLOW_AUTH in deny reason" "$OUTPUT" "AXONFLOW_AUTH"
+    assert_contains "States fail-closed posture" "$OUTPUT" "fail-closed"
+fi
+
+echo ""
+echo "--- PreToolUse: -32001 + AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1 → break-glass allow ---"
+# v1.5.3 documented break-glass: an operator can opt OUT of fail-closed while
+# fixing the credential. Default stays fail-closed (tested above); with the
+# flag set, the same -32001 yields a silent allow (exit 0, no deny) plus a
+# loud stderr warning.
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"AUTH_ERROR test"}}' | \
+        AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1 "$PRE_HOOK" 2>/tmp/axonflow-breakglass-stderr.$$)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0 (break-glass allow)" "0" "$EXIT_CODE"
+    assert_empty "No deny decision under break-glass (silent allow)" "$OUTPUT"
+    assert_contains "Loud stderr warning emitted" "$(cat /tmp/axonflow-breakglass-stderr.$$ 2>/dev/null)" "WITHOUT GOVERNANCE"
+    rm -f /tmp/axonflow-breakglass-stderr.$$
 fi
 
 echo ""
@@ -385,7 +408,7 @@ else
     assert_eq "Exit code is 0 (structured deny output)" "0" "$EXIT_CODE"
     assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
     assert_contains "Decision is deny (carve-out preserves -32001 semantics)" "$OUTPUT" '"deny"'
-    assert_contains "Has governance blocked" "$OUTPUT" "governance blocked"
+    assert_contains "Names AXONFLOW_AUTH in deny reason" "$OUTPUT" "AXONFLOW_AUTH"
     # Belt-and-suspenders: the throttle file MUST NOT be stamped on the
     # -32001 carve-out path. If it were, a subsequent (legitimate) call
     # would be silenced by axonflow_throttle_active.

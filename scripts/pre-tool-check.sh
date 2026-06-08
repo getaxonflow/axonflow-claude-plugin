@@ -274,7 +274,39 @@ JSONRPC_ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty' 2>/dev/null |
 if [ -n "$JSONRPC_ERROR" ]; then
   JSONRPC_CODE=$(echo "$RESPONSE" | jq -r '.error.code // 0' 2>/dev/null || echo "0")
   case "$JSONRPC_CODE" in
-    -32001|-32601|-32602)
+    -32001)
+      # Auth error. The agent rejected the policy check because no valid
+      # credential reached it — almost always a self-hosted / Enterprise
+      # (in-VPC) agent that requires HTTP Basic auth, with AXONFLOW_AUTH
+      # unset or wrong. Fail closed (default) so an unauthenticated session
+      # can't silently bypass governance — but the deny reason MUST name the
+      # exact env vars, or the operator is left guessing (the difference
+      # between a 30-second fix and the cryptic "axonflow failed / OAuth
+      # 404" dead-end).
+      #
+      # Break-glass: AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1 lets an operator keep
+      # working while they fix the credential, at the cost of running
+      # ungoverned. OFF by default; emits a loud stderr warning every time
+      # it fires — never a silent weakening of the posture.
+      if [ "${AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR:-}" = "1" ] || [ "${AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR:-}" = "true" ]; then
+        echo "[AxonFlow] WARNING: auth error from ${ENDPOINT} (${JSONRPC_ERROR}); AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR is set, so this tool call is ALLOWED WITHOUT GOVERNANCE. Set AXONFLOW_AUTH=base64(org_id:license_key) and unset this break-glass to restore enforcement." >&2
+        exit 0
+      fi
+      jq -n \
+        --arg err "$JSONRPC_ERROR" \
+        --arg endpoint "$ENDPOINT" \
+        '{
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: ("AxonFlow governance is fail-closed: the agent at " + $endpoint + " rejected the policy check with an authentication error (\"" + $err + "\", code -32001), so this tool call is blocked. This is a self-hosted / Enterprise (in-VPC) agent that requires credentials. Fix: set AXONFLOW_ENDPOINT to your agent URL and AXONFLOW_AUTH to base64(org_id:license_key) — e.g. export AXONFLOW_AUTH=$(printf %s \"<org_id>:<license_key>\" | base64) — then restart Claude Code. Docs: https://docs.getaxonflow.com/docs/integration/claude-code#self-hosted--enterprise-authentication . Break-glass to keep working ungoverned while you fix it: export AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1 (not recommended).")
+          }
+        }'
+      exit 0
+      ;;
+    -32601|-32602)
+      # Method not found / invalid params — plugin/agent version mismatch or
+      # a plugin bug. Fail closed; the operator should upgrade.
       jq -n \
         --arg err "$JSONRPC_ERROR" \
         --arg code "$JSONRPC_CODE" \
@@ -282,7 +314,7 @@ if [ -n "$JSONRPC_ERROR" ]; then
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
-            permissionDecisionReason: ("AxonFlow governance blocked: " + $err + " (code " + $code + "). Fix AxonFlow configuration to restore tool access.")
+            permissionDecisionReason: ("AxonFlow governance blocked: " + $err + " (code " + $code + "). This usually means the plugin and the AxonFlow agent are on incompatible versions — upgrade the plugin or the agent so the MCP method set matches, then restart Claude Code.")
           }
         }'
       exit 0

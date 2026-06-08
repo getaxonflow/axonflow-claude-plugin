@@ -2,6 +2,56 @@
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-06-08 — Fix MCP server connection on self-hosted / Enterprise agents (no more "axonflow failed / OAuth 404") + actionable fail-closed deny
+
+### Fixed
+
+- **MCP server connection now works on self-hosted and Enterprise (in-VPC)
+  agents.** `.mcp.json` previously set
+  `"headersHelper": "${CLAUDE_PLUGIN_ROOT}/scripts/mcp-auth-headers.sh"`, but
+  Claude Code does **not** expand `${CLAUDE_PLUGIN_ROOT}` (or any env var) in
+  the `headersHelper` field — only in `command`, `args`, `env`, `url`, and
+  `headers`. The helper therefore resolved to a non-existent path, never ran,
+  and **no `Authorization` header was sent** — so the MCP connection fell into
+  OAuth discovery and died on the agent's plaintext `404 page not found`,
+  surfacing as `/mcp` → *"axonflow failed (HTTP 404: Invalid OAuth error
+  response … Raw body: 404 page not found)"*. This hit **every** install
+  (community and Enterprise) regardless of whether `AXONFLOW_AUTH` was set.
+  `.mcp.json` now inlines a **self-contained, path-independent** header
+  resolver that reads the credential from `AXONFLOW_AUTH` (Enterprise /
+  self-hosted) or the Community-SaaS `try-registration.json`, plus the Pro
+  `X-License-Token` (env or the 0600-guarded on-disk file) and
+  `X-Axonflow-Client`. Verified end-to-end through the real `claude` binary:
+  `/mcp` now shows **connected**, governed MCP tool calls work, and policy
+  denials still block. `scripts/mcp-auth-headers.sh` is retained as the
+  reference implementation.
+
+### Changed
+
+- **Auth-failure deny is now actionable.** When the agent rejects the policy
+  pre-check with an authentication error (JSON-RPC `-32001`), the
+  `PreToolUse` deny reason now names the exact env vars to set
+  (`AXONFLOW_ENDPOINT` + `AXONFLOW_AUTH=base64(org_id:license_key)`) and links
+  the integration docs, instead of the generic "Fix AxonFlow configuration".
+  The posture stays **fail-closed** by default. A documented break-glass —
+  `AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1` — lets an operator keep working
+  ungoverned while they fix the credential, emitting a loud stderr warning
+  every time it fires (never a silent weakening). `-32601`/`-32602`
+  (version-mismatch) denials get their own clearer message.
+
+### Added
+
+- **`runtime-e2e/self-hosted-enterprise-auth/`** — drives the real `claude`
+  binary against a real self-hosted / Enterprise agent with a **real
+  (non-demo) license**, asserting (a) `/mcp` connects + an MCP tool call is
+  allowed + a destructive op is blocked, and (b) auth-missing fails **closed**
+  with an actionable message — never the OAuth-404 and never a silent allow.
+  It deliberately refuses to fall back to demo creds.
+- **`tests/test-mcp-headers.sh`** — unit test pinning the inline
+  `headersHelper`: valid JSON, no `${CLAUDE_PLUGIN_ROOT}` dependency
+  (regression guard), and correct credential resolution from env / community
+  file / none.
+
 ## [1.5.2] - 2026-05-22 — Separate auth-failure stamp file + JSON-RPC auth-error fail-closed carve-out + license-token cache-skip + `org_id` in telemetry heartbeat
 
 ### Added
