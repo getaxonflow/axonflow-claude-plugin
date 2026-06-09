@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-10 — `/axonflow-login --self-hosted` Enterprise credential fallback + endpoint-gated Community-SaaS credential (no more Enterprise MCP 401)
+
 ### Fixed
 
 - **MCP tool execution no longer 401s on self-hosted / Enterprise agents when a
