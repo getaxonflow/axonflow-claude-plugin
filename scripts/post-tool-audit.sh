@@ -35,6 +35,16 @@ REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-5}"
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 AUTH="${AXONFLOW_AUTH:-}"
 
+# Self-hosted / Enterprise credential resolution (axonflow-claude-plugin#94) —
+# mirror pre-tool-check.sh so both hooks and the inline MCP headersHelper agree
+# on the credential. Falls back to ~/.config/axonflow/self-hosted-auth.json on
+# a self-hosted/Enterprise agent when AXONFLOW_AUTH is unset, and normalizes a
+# raw "<org>:<key>" value to base64. No-op in community-saas mode.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/self-hosted-auth.sh"
+resolve_self_hosted_auth
+AUTH="${AXONFLOW_AUTH:-}"
+
 # V1 paid Pro tier (axonflow-enterprise PR #1850): match pre-tool-check's
 # header policy so the audit + scan calls also surface the X-License-Token.
 # shellcheck disable=SC1091

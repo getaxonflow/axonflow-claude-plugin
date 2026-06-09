@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP tool execution no longer 401s on self-hosted / Enterprise agents when a
+  Community-SaaS registration is left on disk ([axonflow-claude-plugin#94](https://github.com/getaxonflow/axonflow-claude-plugin/issues/94)).**
+  The inline `.mcp.json` `headersHelper` fell back to the Community-SaaS
+  `~/.config/axonflow/try-registration.json` **regardless of endpoint**. With
+  `AXONFLOW_AUTH` unset and a `cs_<uuid>` registration present (left over from
+  any prior community-saas run), it base64-encoded that `cs_<uuid>:secret`
+  credential and sent it to the Enterprise agent, which rejected it with
+  `invalid license key prefix (expected AXON-)` → HTTP 401 → `/mcp` showed
+  "axonflow failed" and no AxonFlow MCP tool could execute. The per-call hooks
+  gate the Community-SaaS credential on `AXONFLOW_MODE=community-saas`, so they
+  kept authenticating — exactly the "governs via hooks but can't execute MCP
+  tools" asymmetry reported by a design partner. Fixes:
+  - The inline `headersHelper` now only uses `try-registration.json` when the
+    endpoint is Community-SaaS (`AXONFLOW_ENDPOINT` unset or a
+    `try.getaxonflow.com` host). On a self-hosted/Enterprise endpoint it never
+    sends the `cs_` credential.
+  - **New durable Enterprise credential fallback** at
+    `~/.config/axonflow/self-hosted-auth.json` (mode `0600`), read by BOTH the
+    `headersHelper` and the hooks when `AXONFLOW_AUTH` is not in the
+    subprocess env — so MCP auth is no longer solely dependent on the env
+    reaching every subprocess (parity with the Community-SaaS and Pro file
+    caches). Written by `/axonflow-login --self-hosted <org_id> <license_key>`.
+    **Precedence: the `AXONFLOW_AUTH` env var always wins; the file is the
+    fallback.**
+  - A raw `"<org>:<key>"` `AXONFLOW_AUTH` (a common misconfig that 401s as
+    `Basic <raw>`) is now normalized to the base64 the agent expects, on both
+    the `headersHelper` and hook paths.
+  - New `scripts/self-hosted-auth.sh` keeps the hooks and the `headersHelper`
+    in credential parity. New unit coverage in `tests/test-mcp-headers.sh` and
+    a real-claude-binary runtime test at
+    `runtime-e2e/mcp-self-hosted-auth-fallback/` (asserts an MCP tool actually
+    executes via the file fallback, and that the stale `cs_` credential never
+    reaches the Enterprise agent). Community-SaaS behavior is unchanged.
+
 ## [1.5.3] - 2026-06-08 — Fix MCP server connection on self-hosted / Enterprise agents (no more "axonflow failed / OAuth 404") + actionable fail-closed deny
 
 ### Fixed
