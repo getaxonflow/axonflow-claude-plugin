@@ -86,6 +86,79 @@ else
   echo "FAIL: no-credential output is not the expected valid JSON: $OUT"; fail=1
 fi
 
+# ---------------------------------------------------------------------------
+# axonflow-claude-plugin#94 regression coverage.
+#
+# Root cause: against a self-hosted/Enterprise agent (AXONFLOW_ENDPOINT set to a
+# non-try host) with AXONFLOW_AUTH unset, the inline helper fell back to the
+# Community-SaaS try-registration.json and sent a cs_<uuid> credential. The
+# Enterprise agent rejected it ("invalid license key prefix (expected AXON-)")
+# → HTTP 401 → `/mcp` showed "axonflow failed". The fixes below MUST hold.
+# ---------------------------------------------------------------------------
+ENT_EP='http://axonflow.internal:8080'
+
+# 7) THE #94 fix: Enterprise endpoint + stale cs_ try-registration.json + no
+#    auth → the cs_ credential MUST NOT be sent (no Authorization at all).
+#    Proven red-on-revert: an ungated cs_ fallback emits "Basic base64(cs_...)".
+TMPHOME="$(mktemp -d)"
+mkdir -p "$TMPHOME/.config/axonflow"
+printf '%s' '{"tenant_id":"cs_stale","secret":"sekret"}' > "$TMPHOME/.config/axonflow/try-registration.json"
+OUT="$(env -u AXONFLOW_AUTH HOME="$TMPHOME" AXONFLOW_ENDPOINT="$ENT_EP" /bin/sh -c "cd / && $HH")"
+if printf '%s' "$OUT" | jq -e 'has("Authorization")|not' >/dev/null 2>&1; then
+  echo "PASS: Enterprise endpoint + stale cs_ registration → no cross-deployment Authorization leak"
+else
+  echo "FAIL: Enterprise endpoint leaked a Community-SaaS cs_ credential: $OUT"; fail=1
+fi
+rm -rf "$TMPHOME"
+
+# 8) Durable Enterprise fallback: Enterprise endpoint + self-hosted-auth.json
+#    (0600) + no auth → Authorization from the file's base64 .auth value.
+TMPHOME="$(mktemp -d)"
+mkdir -p "$TMPHOME/.config/axonflow"
+SH_AUTH="$(printf 'acme:AXON-key' | base64 | tr -d '\n')"
+printf '{"org_id":"acme","license_key":"AXON-key","auth":"%s"}' "$SH_AUTH" > "$TMPHOME/.config/axonflow/self-hosted-auth.json"
+chmod 600 "$TMPHOME/.config/axonflow/self-hosted-auth.json"
+OUT="$(env -u AXONFLOW_AUTH HOME="$TMPHOME" AXONFLOW_ENDPOINT="$ENT_EP" /bin/sh -c "cd / && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '.Authorization // empty')" = "Basic $SH_AUTH" ]; then
+  echo "PASS: Enterprise endpoint + self-hosted-auth.json(0600) → Authorization from file"
+else
+  echo "FAIL: self-hosted-auth.json fallback wrong: $OUT"; fail=1
+fi
+
+# 9) Security posture: self-hosted-auth.json with loose perms → refused.
+chmod 644 "$TMPHOME/.config/axonflow/self-hosted-auth.json"
+OUT="$(env -u AXONFLOW_AUTH HOME="$TMPHOME" AXONFLOW_ENDPOINT="$ENT_EP" /bin/sh -c "cd / && $HH" 2>/dev/null)"
+if printf '%s' "$OUT" | jq -e 'has("Authorization")|not' >/dev/null 2>&1; then
+  echo "PASS: self-hosted-auth.json with unsafe perms (0644) → refused (no Authorization)"
+else
+  echo "FAIL: loose-perm self-hosted-auth.json was used: $OUT"; fail=1
+fi
+rm -rf "$TMPHOME"
+
+# 10) base64 normalization: a raw "<org>:<key>" AXONFLOW_AUTH (a common
+#     misconfig that 401s as "Basic <raw>") is coerced to base64.
+OUT="$(HOME=/nonexistent-empty-home AXONFLOW_ENDPOINT="$ENT_EP" AXONFLOW_AUTH='rawid:rawsecret' /bin/sh -c "cd / && $HH")"
+EXPECT="Basic $(printf 'rawid:rawsecret' | base64 | tr -d '\n')"
+if [ "$(printf '%s' "$OUT" | jq -r '.Authorization // empty')" = "$EXPECT" ]; then
+  echo "PASS: raw <org>:<key> AXONFLOW_AUTH normalized to base64"
+else
+  echo "FAIL: raw AXONFLOW_AUTH not normalized: $OUT"; fail=1
+fi
+
+# 11) Precedence: env AXONFLOW_AUTH wins over the self-hosted-auth.json file.
+TMPHOME="$(mktemp -d)"
+mkdir -p "$TMPHOME/.config/axonflow"
+printf '{"org_id":"file","license_key":"k","auth":"%s"}' "$(printf 'file:k'|base64|tr -d '\n')" > "$TMPHOME/.config/axonflow/self-hosted-auth.json"
+chmod 600 "$TMPHOME/.config/axonflow/self-hosted-auth.json"
+ENVB64="$(printf 'envwins:s' | base64 | tr -d '\n')"
+OUT="$(HOME="$TMPHOME" AXONFLOW_ENDPOINT="$ENT_EP" AXONFLOW_AUTH="$ENVB64" /bin/sh -c "cd / && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '.Authorization // empty')" = "Basic $ENVB64" ]; then
+  echo "PASS: env AXONFLOW_AUTH takes precedence over self-hosted-auth.json"
+else
+  echo "FAIL: env did not win over file: $OUT"; fail=1
+fi
+rm -rf "$TMPHOME"
+
 echo ""
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: .mcp.json headersHelper unit test"

@@ -51,6 +51,19 @@ echo "[AxonFlow] Connected to AxonFlow at ${ENDPOINT} (mode=${AXONFLOW_MODE})" >
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 AUTH="${AXONFLOW_AUTH:-}"
 
+# Self-hosted / Enterprise credential resolution (axonflow-claude-plugin#94).
+# Keeps the hooks in parity with the inline MCP headersHelper: when running
+# against a self-hosted/Enterprise agent with AXONFLOW_AUTH unset, fall back to
+# ~/.config/axonflow/self-hosted-auth.json instead of the Community-SaaS
+# registration (which would send a cs_<uuid> credential the Enterprise agent
+# rejects with "invalid license key prefix"). Also normalizes a raw
+# "<org>:<key>" AXONFLOW_AUTH to the base64 the agent expects. No-op in
+# community-saas mode (the registration bootstrap owns that credential).
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/self-hosted-auth.sh"
+resolve_self_hosted_auth
+AUTH="${AXONFLOW_AUTH:-}"
+
 # V1 paid Pro tier (axonflow-enterprise PR #1850): resolve the license token
 # from env (AXONFLOW_LICENSE_TOKEN — wins) or ~/.config/axonflow/license-token.json
 # (written by `/axonflow-login --token <AXON-...>`). When present, the plugin
