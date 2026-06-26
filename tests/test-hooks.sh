@@ -215,6 +215,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             # Policy blocks the command
             result_text = json.dumps({'allowed': False, 'block_reason': 'Test policy violation', 'policies_evaluated': 10})
             resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'result': {'content': [{'type': 'text', 'text': result_text}]}}
+        elif 'REQUIRES_REDACT' in statement:
+            # PII under a redact-action policy: allowed but requires redaction (#2746)
+            redacted = statement.replace('REQUIRES_REDACT', '[REDACTED]')
+            result_text = json.dumps({'allowed': True, 'requires_redaction': True, 'redacted_statement': redacted, 'decision_id': 'test-redact-decision'})
+            resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'result': {'content': [{'type': 'text', 'text': result_text}]}}
         elif tool_name == 'audit_tool_call':
             result_text = json.dumps({'recorded': True, 'tool_name': args.get('tool_name', 'test')})
             resp = {'jsonrpc': '2.0', 'id': body.get('id'), 'result': {'content': [{'type': 'text', 'text': result_text}]}}
@@ -345,6 +350,37 @@ assert_eq "Exit code is 0 (structured deny)" "0" "$EXIT_CODE"
 assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
 assert_contains "Decision is deny" "$OUTPUT" '"deny"'
 assert_contains "Has policy reason" "$OUTPUT" "policy violation"
+
+echo ""
+echo "--- PreToolUse: requires_redaction:true → deny with redacted content ---"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger (REQUIRES_REDACT sentinel not recognized by real agent)"
+    ((PASS++)) || true
+else
+    OUTPUT=$(echo '{"tool_name":"Bash","tool_input":{"command":"echo REQUIRES_REDACT SSN here"}}' | "$PRE_HOOK" 2>/dev/null)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0 (structured deny)" "0" "$EXIT_CODE"
+    assert_contains "Has permissionDecision" "$OUTPUT" "permissionDecision"
+    assert_contains "Decision is deny" "$OUTPUT" '"deny"'
+    assert_contains "Has permissionDecisionReason mentioning PII" "$OUTPUT" "PII"
+    assert_contains "Has additionalContext with redacted version" "$OUTPUT" "additionalContext"
+    assert_contains "additionalContext contains redacted marker" "$OUTPUT" "REDACTED"
+fi
+
+echo ""
+echo "--- PreToolUse: requires_redaction:true for Write → deny with content only ---"
+if [ "${1:-}" = "--live" ]; then
+    echo "  SKIP: mock-only trigger (REQUIRES_REDACT sentinel not recognized by real agent)"
+    ((PASS++)) || true
+else
+    OUTPUT=$(printf '{"tool_name":"Write","tool_input":{"file_path":"/tmp/test.txt","content":"REQUIRES_REDACT secret value here"}}' | "$PRE_HOOK" 2>/dev/null)
+    EXIT_CODE=$?
+    assert_eq "Exit code is 0" "0" "$EXIT_CODE"
+    assert_contains "Write deny has additionalContext" "$OUTPUT" "additionalContext"
+    assert_contains "Write additionalContext contains redacted marker" "$OUTPUT" "REDACTED"
+    assert_empty "Write additionalContext must not leak file path" "$(echo "$OUTPUT" | grep -F '/tmp/test.txt' || true)"
+    assert_empty "Write additionalContext must not contain unredacted PII token" "$(echo "$OUTPUT" | grep -F 'REQUIRES_REDACT' || true)"
+fi
 
 echo ""
 echo "--- PreToolUse: JSON-RPC auth error → deny ---"

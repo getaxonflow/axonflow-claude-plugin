@@ -157,12 +157,12 @@ case "$TOOL_NAME" in
     # .claude/settings, MEMORY.md) are scoped via integration activation,
     # so they only fire when the relevant integration is enabled.
     FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
-    CONTENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty' | cut -c1-2000)
+    CONTENT=$(echo "$TOOL_INPUT" | jq -r '.content // empty')
     STATEMENT="${FILE_PATH}"$'\n'"${CONTENT}"
     ;;
   Edit)
     FILE_PATH=$(echo "$TOOL_INPUT" | jq -r '.file_path // empty')
-    NEW_STRING=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty' | cut -c1-2000)
+    NEW_STRING=$(echo "$TOOL_INPUT" | jq -r '.new_string // empty')
     STATEMENT="${FILE_PATH}"$'\n'"${NEW_STRING}"
     ;;
   NotebookEdit)
@@ -360,6 +360,65 @@ DECISION_ID=$(echo "$TOOL_RESULT" | jq -r '.decision_id // empty' 2>/dev/null ||
 RISK_LEVEL=$(echo "$TOOL_RESULT" | jq -r '.risk_level // empty' 2>/dev/null || echo "")
 OVERRIDE_AVAILABLE=$(echo "$TOOL_RESULT" | jq -r '.override_available // false' 2>/dev/null || echo "false")
 OVERRIDE_EXISTING_ID=$(echo "$TOOL_RESULT" | jq -r '.override_existing_id // empty' 2>/dev/null || echo "")
+
+# Issue #2746: requires_redaction path. When check_policy returns
+# requires_redaction:true (PII under a redact-action policy), deny the tool
+# call before it executes and give Claude the masked content to retry with.
+# This prevents the first Write from landing raw PII on disk.
+REQUIRES_REDACTION=$(echo "$TOOL_RESULT" | jq -r 'if .requires_redaction == true then "true" else "false" end' 2>/dev/null || echo "false")
+REDACTED_STATEMENT=$(echo "$TOOL_RESULT" | jq -r '.redacted_statement // empty' 2>/dev/null || echo "")
+
+if [ "$REQUIRES_REDACTION" = "true" ] && [ -n "$REDACTED_STATEMENT" ]; then
+  # Write and Edit both build STATEMENT as FILE_PATH\nCONTENT so we strip the
+  # path header before handing the masked body to Claude as additionalContext.
+  # Fall back to the full redacted_statement if the agent returns content-only
+  # (no newline separator) — tail -n +2 would otherwise produce empty output.
+  REDACTED_CONTENT="$REDACTED_STATEMENT"
+  if [ "$TOOL_NAME" = "Write" ] || [ "$TOOL_NAME" = "Edit" ]; then
+    REDACTED_CONTENT=$(printf '%s' "$REDACTED_STATEMENT" | tail -n +2)
+    if [ -z "$REDACTED_CONTENT" ]; then
+      REDACTED_CONTENT="$REDACTED_STATEMENT"
+    fi
+  fi
+
+  # Audit the redaction event (fire-and-forget) so it appears in compliance
+  # reports alongside blocked events. Statement omitted — it contains raw PII.
+  curl -s --max-time "$REQUEST_TIMEOUT_SECONDS" -X POST "${ENDPOINT}/api/v1/mcp-server" \
+    -H "Content-Type: application/json" \
+    -H "Accept: application/json" \
+    "${AUTH_HEADER[@]}" \
+    -d "$(jq -n \
+      --arg tn "$TOOL_NAME" \
+      --arg policies "$POLICIES_EVALUATED" \
+      '{
+        jsonrpc: "2.0",
+        id: "hook-audit-redacted",
+        method: "tools/call",
+        params: {
+          name: "audit_tool_call",
+          arguments: {
+            tool_name: $tn,
+            tool_type: "claude_code",
+            input: {statement: "[redacted]"},
+            output: {policy_decision: "redacted", policies_evaluated: $policies},
+            success: false,
+            error_message: "PII detected — retry with redacted content"
+          }
+        }
+      }')" > /dev/null 2>&1 &
+
+  jq -n \
+    --arg content "$REDACTED_CONTENT" \
+    '{
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: "AxonFlow detected PII in the tool input. Please retry using the redacted version provided in additionalContext.",
+        additionalContext: ("AxonFlow redacted PII from the input. Use this version instead:\n\n" + $content)
+      }
+    }'
+  exit 0
+fi
 
 if [ "$ALLOWED" = "false" ]; then
   # Record the blocked attempt in the audit trail (fire-and-forget).
