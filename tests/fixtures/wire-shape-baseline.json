@@ -13,6 +13,8 @@
       "override_available",
       "override_existing_id",
       "policies_evaluated",
+      "redacted_statement",
+      "requires_redaction",
       "risk_level"
     ],
     "MCPCheckOutputResponse": [
@@ -24,7 +26,10 @@
   },
   "per_type_drift": {
     "MCPCheckInputResponse": {
-      "plugin_only": [],
+      "plugin_only": [
+        "redacted_statement",
+        "requires_redaction"
+      ],
       "spec_only": [
         "policy_info",
         "policy_matches"
