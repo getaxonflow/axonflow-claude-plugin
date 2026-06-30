@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-06-30 — Hook denies and retries with redacted content on `requires_redaction` policies (no raw PII landing on disk)
+
+Pairs with platform **≥ 9.2.2**, which adds `requires_redaction` and
+`redacted_statement` to the `check_policy` (MCP check-input) response.
+
+### Added
+
+- **`runtime-e2e/2746_pii_redact_hook/`** — real-agent runtime test for the
+  redaction-retry path ([axonflow-claude-plugin#98](https://github.com/getaxonflow/axonflow-claude-plugin/issues/98)).
+  Against an agent configured with `PII_ACTION=redact`, it drives
+  `pre-tool-check.sh` with a NIK-bearing `Write` and asserts the hook emits
+  `permissionDecision: deny` with a non-empty `additionalContext` that carries
+  the agent-masked statement (raw NIK absent); a clean `Write` is asserted to
+  pass through with no deny. Skips gracefully when no `PII_ACTION=redact` agent
+  is reachable.
+
+### Fixed
+
+- **PII under a redact-action policy is no longer written to disk in the
+  clear ([axonflow-claude-plugin#98](https://github.com/getaxonflow/axonflow-claude-plugin/issues/98), plugin side of
+  [axonflow-enterprise#2746](https://github.com/getaxonflow/axonflow-enterprise/issues/2746)).**
+  When `check_policy` returns `requires_redaction: true`, `pre-tool-check.sh`
+  now **denies** the tool call and returns the engine-masked
+  `redacted_statement` to Claude in `additionalContext`, so Claude retries with
+  clean content instead of letting the original `Write` execute with raw PII.
+  For `Write`/`Edit` the `file_path` header is stripped so only the masked body
+  is handed back (falling back to the full statement when the agent returns
+  content with no path separator). The redaction event is recorded in the audit
+  trail (fire-and-forget, statement omitted) so it appears alongside blocked
+  events in compliance reports.
+- **`Write`/`Edit` inputs are no longer truncated to 2000 characters before the
+  policy check**, so PII past that offset can no longer slip past the redaction
+  gate.
+- **Wire-shape baseline registers `requires_redaction` and `redacted_statement`
+  as known plugin-only fields on `MCPCheckInputResponse`**, keeping the
+  wire-shape gate green in the window before the platform OpenAPI spec
+  ([axonflow-enterprise#2747](https://github.com/getaxonflow/axonflow-enterprise/issues/2747)) is refreshed.
+
 ## [1.6.0] - 2026-06-10 — `/axonflow-login --self-hosted` Enterprise credential fallback + endpoint-gated Community-SaaS credential (no more Enterprise MCP 401)
 
 ### Fixed
