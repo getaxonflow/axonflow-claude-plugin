@@ -97,11 +97,12 @@ We're opening limited **Plugin Design Partner** slots.
 
 ### See AxonFlow in Action
 
-Three short videos covering different angles of the platform:
+Four short videos covering different angles of the platform:
 
 - **[Community Quickstart Demo (Code + Terminal, 2.5 min)](https://youtu.be/BSqU1z0xxCo)** — governed calls, PII block, Gateway Mode with LangChain/CrewAI, and MAP from YAML
 - **[Runtime Control Demo (Portal + Workflow, 3 min)](https://youtu.be/6UatGpn7KwE)** — approvals, retry safety, execution state, and the audit viewer
 - **[Architecture Deep Dive (12 min)](https://youtu.be/Q2CZ1qnquhg)** — how the control plane works, policy enforcement flow, and multi-agent planning
+- **Plugin setup & usage walkthrough** — install AxonFlow and watch governance fire on real coding work (PII redaction, production-change guardrails, audit trail): [Watch on YouTube](https://youtu.be/_dlnX_xLYmU)
 
 ### Plugin Evaluation Tier (Free 90-day License)
 
