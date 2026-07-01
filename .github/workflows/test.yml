@@ -34,6 +34,8 @@ jobs:
           bash -n scripts/pre-tool-check.sh
           bash -n scripts/post-tool-audit.sh
           bash -n scripts/upgrade-prompt.sh
+          bash -n scripts/user-identity.sh
+          bash -n scripts/mcp-auth-headers.sh
 
       - name: Run hook regression tests (mock server)
         run: |
@@ -59,6 +61,16 @@ jobs:
         run: |
           chmod +x tests/test-mcp-headers.sh
           ./tests/test-mcp-headers.sh
+
+      - name: Run per-developer identity unit test (X-User-Email, #2754)
+        run: |
+          chmod +x tests/test-user-identity.sh
+          ./tests/test-user-identity.sh
+
+      - name: Run X-User-Email hook-wire test (#2754)
+        run: |
+          chmod +x tests/test-user-email-header-wire.sh
+          ./tests/test-user-email-header-wire.sh
 
       - name: Validate plugin structure
         run: |

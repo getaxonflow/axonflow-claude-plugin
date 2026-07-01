@@ -293,9 +293,42 @@ unset AXONFLOW_ENDPOINT AXONFLOW_AUTH
 # Optional: increase hook timeout for remote / VPN'd deployments
 # (PreToolUse default 8s, PostToolUse default 5s)
 export AXONFLOW_TIMEOUT_SECONDS=12
+
+# Optional: attribute governed requests to a specific developer so the
+# customer portal's User column and audit filter show a real person instead
+# of a synthetic id. See "Per-developer identity" below.
+export AXONFLOW_USER_EMAIL=alice@your-company.com
 ```
 
 When `AXONFLOW_AUTH` is unset and `AXONFLOW_ENDPOINT` is unset, the plugin defaults to AxonFlow Community SaaS — no further configuration needed.
+
+### Per-developer identity (`AXONFLOW_USER_EMAIL`)
+
+By default a self-hosted / Enterprise agent attributes every governed request to
+the credential's tenant (a client-scoped synthetic id), so the customer portal's
+**User** column shows the same value for the whole team. Set `AXONFLOW_USER_EMAIL`
+to the developer's email and the plugin sends it as the `X-User-Email` header on
+every governed call — the MCP connection and both hooks — so audit rows are
+attributed to the individual and the portal can filter by teammate.
+
+```bash
+export AXONFLOW_USER_EMAIL=alice@your-company.com
+```
+
+Resolution precedence:
+
+1. **`AXONFLOW_USER_EMAIL`** — the supported source. Claude Code does not expose
+   the logged-in Anthropic account email to plugins/hooks, so set this per
+   developer via your shell profile or fleet tooling (MDM / JumpCloud).
+2. **`git config user.email`** — a best-effort fallback used only when the env
+   var is unset. ⚠️ This is the *git* identity, **not** the Anthropic account,
+   so it can be silently wrong on shared machines or service accounts. Treat it
+   as a convenience default, not an authoritative identity.
+3. **Unset** — no `X-User-Email` header is sent; the agent falls back to its
+   client-scoped synthetic id (never a blank/broken User column).
+
+Identity here is *asserted*, not cryptographically verified — it improves audit
+visibility; it is not an authentication boundary.
 
 ---
 

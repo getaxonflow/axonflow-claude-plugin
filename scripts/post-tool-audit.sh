@@ -78,6 +78,17 @@ if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
   AUTH_HEADER+=(-H "X-License-Token: ${AXONFLOW_LICENSE_TOKEN}")
 fi
 
+# Per-developer identity (issue #2754) — mirror pre-tool-check.sh so the
+# post-tool audit_tool_call POST AND the check_output scan below (both reuse
+# AUTH_HEADER) attribute the row to the real developer via X-User-Email.
+# Omitted entirely when unset (no empty header).
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/user-identity.sh"
+resolve_user_identity
+if [ -n "${AXONFLOW_USER_EMAIL_RESOLVED:-}" ]; then
+  AUTH_HEADER+=(-H "X-User-Email: ${AXONFLOW_USER_EMAIL_RESOLVED}")
+fi
+
 # Read hook input from stdin
 INPUT=$(cat)
 
@@ -88,6 +99,14 @@ TOOL_RESPONSE=$(echo "$INPUT" | jq -c '.tool_response // {}' 2>/dev/null || echo
 # Skip if no tool name
 if [ -z "$TOOL_NAME" ]; then
   exit 0
+fi
+
+# Per-session identity (issue #2753) — mirror pre-tool-check.sh. session_id from
+# the hook stdin JSON is forwarded as X-Session-Id on the audit_tool_call +
+# check_output curls (both reuse AUTH_HEADER). CR/LF stripped; omitted when absent.
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null | tr -d '\r\n' || echo "")
+if [ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "null" ]; then
+  AUTH_HEADER+=(-H "X-Session-Id: ${SESSION_ID}")
 fi
 
 CONNECTOR_TYPE="claude_code.${TOOL_NAME}"

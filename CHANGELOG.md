@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Per-developer identity via `AXONFLOW_USER_EMAIL`
+  ([axonflow-enterprise#2754](https://github.com/getaxonflow/axonflow-enterprise/issues/2754)).**
+  The plugin now resolves a developer email — `AXONFLOW_USER_EMAIL` env var
+  (the supported source), falling back best-effort to `git config user.email`,
+  else unset — and sends it as the `X-User-Email` header on every governed
+  request: the `.mcp.json` MCP connection, `pre-tool-check.sh` (`check_policy`)
+  and `post-tool-audit.sh` (`check_output` / `audit_tool_call`). This attributes
+  audit rows to a real person so the customer portal's **User** column and audit
+  filter show the individual instead of the client-scoped synthetic
+  `mcp-client:<org>` id. When no identity resolves the header is omitted
+  entirely (the agent degrades to its synthetic id — never a blank column).
+  New helper `scripts/user-identity.sh`; documented in the README under
+  "Per-developer identity". Identity is *asserted*, not verified — it improves
+  audit visibility, not authentication.
+- **Per-session attribution via `X-Session-Id`
+  ([axonflow-enterprise#2753](https://github.com/getaxonflow/axonflow-enterprise/issues/2753)).**
+  The PreToolUse/PostToolUse hooks now forward Claude Code's `session_id` (from
+  the hook stdin JSON) as the `X-Session-Id` header on the `check_policy` and
+  `audit_tool_call` / `check_output` calls, so audit rows carry the AI-tool
+  session alongside the developer email (platform migration core/129 adds
+  `audit_logs.session_id`). No configuration needed — Claude Code always
+  provides `session_id`. The `.mcp.json` MCP connection is unchanged (it has no
+  per-call session id).
+  - Tests: `tests/test-user-identity.sh` (resolution precedence + CR/LF
+    sanitization), `tests/test-user-email-header-wire.sh` (both hooks emit
+    `X-User-Email` when set / omit when unset, via a header-capturing mock
+    agent), and new `X-User-Email` assertions in `tests/test-mcp-headers.sh`.
+
 ## [1.7.0] - 2026-06-30 — Hook denies and retries with redacted content on `requires_redaction` policies (no raw PII landing on disk)
 
 Pairs with platform **≥ 9.2.2**, which adds `requires_redaction` and

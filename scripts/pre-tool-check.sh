@@ -108,6 +108,19 @@ if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
   echo "[AxonFlow] Pro tier active (X-License-Token configured)" >&2
 fi
 
+# Per-developer identity (issue #2754). Resolve AXONFLOW_USER_EMAIL (→ git
+# fallback) and, when present, ship it as X-User-Email so the agent attributes
+# every governed request below — the check_policy POST AND the blocked/redacted
+# audit_tool_call POSTs (all reuse AUTH_HEADER) — to a real developer instead of
+# the synthetic "mcp-client:<org>" id. Omitted entirely when unset (no empty
+# header); the agent then degrades to the synthetic id, never a hard NULL.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/user-identity.sh"
+resolve_user_identity
+if [ -n "${AXONFLOW_USER_EMAIL_RESOLVED:-}" ]; then
+  AUTH_HEADER+=(-H "X-User-Email: ${AXONFLOW_USER_EMAIL_RESOLVED}")
+fi
+
 # One-time positive disclosure when first connecting to Community SaaS. Stamp
 # is separate from telemetry so the disclosure fires exactly once per install,
 # independent of the 7-day heartbeat cadence.
@@ -142,6 +155,17 @@ TOOL_INPUT=$(echo "$INPUT" | jq -c '.tool_input // {}')
 # Skip if no tool name
 if [ -z "$TOOL_NAME" ]; then
   exit 0
+fi
+
+# Per-session identity (issue #2753). Claude Code puts session_id in the hook
+# stdin JSON; forward it as X-Session-Id so audit rows carry the AI-tool session
+# alongside X-User-Email. Appended to AUTH_HEADER so it ships on every governed
+# curl below (check_policy + the blocked/redacted audit_tool_call POSTs). Strip
+# CR/LF as a header-split guard; omitted entirely when absent. This is the ONLY
+# surface that carries session_id — the .mcp.json MCP path has no per-call id.
+SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // empty' 2>/dev/null | tr -d '\r\n' || echo "")
+if [ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "null" ]; then
+  AUTH_HEADER+=(-H "X-Session-Id: ${SESSION_ID}")
 fi
 
 # Derive connector type: claude_code.{ToolName}

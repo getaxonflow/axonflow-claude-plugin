@@ -159,6 +159,52 @@ else
 fi
 rm -rf "$TMPHOME"
 
+# ---------------------------------------------------------------------------
+# Per-developer identity (issue #2754): the headersHelper must emit X-User-Email
+# when AXONFLOW_USER_EMAIL is set, omit it cleanly when unset, and never let a
+# CR/LF-laden value split the header object.
+# ---------------------------------------------------------------------------
+
+# 12) env AXONFLOW_USER_EMAIL → X-User-Email in the emitted object.
+OUT="$(HOME=/nonexistent-empty-home AXONFLOW_USER_EMAIL='alice@example.com' AXONFLOW_AUTH='dGVzdA==' run_hh)"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Email" // empty')" = "alice@example.com" ]; then
+  echo "PASS: AXONFLOW_USER_EMAIL → X-User-Email header"
+else
+  echo "FAIL: X-User-Email not emitted from AXONFLOW_USER_EMAIL: $OUT"; fail=1
+fi
+
+# 13) no identity (empty HOME, cwd / so no repo-local git email) → X-User-Email
+#     is ABSENT (never an empty header). Runs from / to avoid picking up this
+#     repo's own git identity.
+OUT="$(env -u AXONFLOW_USER_EMAIL HOME=/nonexistent-empty-home /bin/sh -c "cd / && $HH")"
+if printf '%s' "$OUT" | jq -e 'has("X-User-Email")|not' >/dev/null 2>&1; then
+  echo "PASS: no identity → X-User-Email omitted"
+else
+  echo "FAIL: X-User-Email present with no identity configured: $OUT"; fail=1
+fi
+
+# 14) header-split guard: a CR/LF-laden value must be stripped and the output
+#     must still be a single valid JSON object.
+OUT="$(HOME=/nonexistent-empty-home AXONFLOW_USER_EMAIL="$(printf 'bob@x.com\r\nEvil: hdr')" AXONFLOW_AUTH='dGVzdA==' run_hh)"
+if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1 \
+   && [ "$(printf '%s' "$OUT" | jq -r '."X-User-Email" // empty')" = "bob@x.comEvil:hdr" ]; then
+  echo "PASS: CR/LF in AXONFLOW_USER_EMAIL stripped (no header split, valid JSON)"
+else
+  echo "FAIL: CR/LF sanitization failed: $OUT"; fail=1
+fi
+
+# 15) JSON-safety guard: a double-quote / backslash in the email (invalid, but
+#     an operator could set it) must be stripped so the emitted header object
+#     stays valid JSON — Claude Code rejects a malformed value for the whole
+#     session.
+OUT="$(HOME=/nonexistent-empty-home AXONFLOW_USER_EMAIL='a"b\c@x.com' AXONFLOW_AUTH='dGVzdA==' run_hh)"
+if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1 \
+   && [ "$(printf '%s' "$OUT" | jq -r '."X-User-Email" // empty')" = "abc@x.com" ]; then
+  echo "PASS: quote/backslash in AXONFLOW_USER_EMAIL stripped (JSON stays valid)"
+else
+  echo "FAIL: quote/backslash not sanitized, JSON may be broken: $OUT"; fail=1
+fi
+
 echo ""
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: .mcp.json headersHelper unit test"
