@@ -52,9 +52,17 @@ resolve_license_token
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/client-header.sh"
 
+# Per-developer identity (issue #2754): resolve AXONFLOW_USER_EMAIL (→ git
+# fallback) so MCP-server traffic carries X-User-Email and the agent attributes
+# the audit row to a real developer. Same env-then-git precedence as the hooks.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/user-identity.sh"
+resolve_user_identity
+
 AUTH="${AXONFLOW_AUTH:-}"
 LICENSE_TOKEN="${AXONFLOW_LICENSE_TOKEN:-}"
 CLIENT_HEADER="${AXONFLOW_CLIENT_HEADER}"
+USER_EMAIL="${AXONFLOW_USER_EMAIL_RESOLVED:-}"
 
 # Cross-deployment safety: drop X-License-Token when the cached token
 # is a community-saas-issued (aud=community_saas_plugin) but the user
@@ -66,27 +74,28 @@ if [ -n "$LICENSE_TOKEN" ] && ! license_token_endpoint_compatible; then
   LICENSE_TOKEN=""
 fi
 
-# Build the JSON header object via jq when available so token values are
-# json-escaped correctly. Without jq, fall back to a bare Authorization +
-# X-Axonflow-Client shape (X-License-Token would need careful escaping so
-# we drop it on this legacy path; per-call hooks still ship it).
+# Build the JSON header object via jq when available so values are json-escaped
+# correctly. Each optional header is added only when its value is non-empty, so
+# X-User-Email (issue #2754) is omitted cleanly when no identity resolves —
+# never an empty header. X-Axonflow-Client always ships (ADR-050 §4). Without
+# jq, fall back to a hand-quoted shape (X-License-Token needs careful escaping
+# so it is dropped on this legacy path; per-call hooks still ship it).
 if command -v jq &>/dev/null; then
-  if [ -n "$AUTH" ] && [ -n "$LICENSE_TOKEN" ]; then
-    jq -nc --arg auth "$AUTH" --arg lt "$LICENSE_TOKEN" --arg ch "$CLIENT_HEADER" \
-      '{"Authorization": ("Basic " + $auth), "X-License-Token": $lt, "X-Axonflow-Client": $ch}'
-  elif [ -n "$AUTH" ]; then
-    jq -nc --arg auth "$AUTH" --arg ch "$CLIENT_HEADER" \
-      '{"Authorization": ("Basic " + $auth), "X-Axonflow-Client": $ch}'
-  elif [ -n "$LICENSE_TOKEN" ]; then
-    jq -nc --arg lt "$LICENSE_TOKEN" --arg ch "$CLIENT_HEADER" \
-      '{"X-License-Token": $lt, "X-Axonflow-Client": $ch}'
-  else
-    jq -nc --arg ch "$CLIENT_HEADER" '{"X-Axonflow-Client": $ch}'
-  fi
+  jq -nc \
+    --arg auth "$AUTH" --arg lt "$LICENSE_TOKEN" --arg ch "$CLIENT_HEADER" --arg ue "$USER_EMAIL" \
+    '{}
+     | (if $auth != "" then . + {"Authorization": ("Basic " + $auth)} else . end)
+     | (if $lt   != "" then . + {"X-License-Token": $lt} else . end)
+     | (if $ue   != "" then . + {"X-User-Email": $ue} else . end)
+     | . + {"X-Axonflow-Client": $ch}'
 else
+  ue_frag=""
+  if [ -n "$USER_EMAIL" ]; then
+    ue_frag=", \"X-User-Email\": \"$USER_EMAIL\""
+  fi
   if [ -n "$AUTH" ]; then
-    echo "{\"Authorization\": \"Basic $AUTH\", \"X-Axonflow-Client\": \"$CLIENT_HEADER\"}"
+    echo "{\"Authorization\": \"Basic $AUTH\"${ue_frag}, \"X-Axonflow-Client\": \"$CLIENT_HEADER\"}"
   else
-    echo "{\"X-Axonflow-Client\": \"$CLIENT_HEADER\"}"
+    echo "{\"X-Axonflow-Client\": \"$CLIENT_HEADER\"${ue_frag}}"
   fi
 fi
