@@ -2,10 +2,14 @@
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-02 — per-developer + per-session identity (X-User-Email / X-Session-Id)
+
+Pairs with platform **≥ 9.3.0**, which ingests `X-User-Email` and `X-Session-Id`
+into the canonical audit row (migration `core/129` adds `audit_logs.session_id`).
+
 ### Added
 
-- **Per-developer identity via `AXONFLOW_USER_EMAIL`
-  ([axonflow-enterprise#2754](https://github.com/getaxonflow/axonflow-enterprise/issues/2754)).**
+- **Per-developer identity via `AXONFLOW_USER_EMAIL`.**
   The plugin now resolves a developer email — `AXONFLOW_USER_EMAIL` env var
   (the supported source), falling back best-effort to `git config user.email`,
   else unset — and sends it as the `X-User-Email` header on every governed
@@ -18,8 +22,7 @@
   New helper `scripts/user-identity.sh`; documented in the README under
   "Per-developer identity". Identity is *asserted*, not verified — it improves
   audit visibility, not authentication.
-- **Per-session attribution via `X-Session-Id`
-  ([axonflow-enterprise#2753](https://github.com/getaxonflow/axonflow-enterprise/issues/2753)).**
+- **Per-session attribution via `X-Session-Id`.**
   The PreToolUse/PostToolUse hooks now forward Claude Code's `session_id` (from
   the hook stdin JSON) as the `X-Session-Id` header on the `check_policy` and
   `audit_tool_call` / `check_output` calls, so audit rows carry the AI-tool
