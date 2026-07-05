@@ -319,6 +319,101 @@ else
   fail "symlink-hygiene case: target mode=$SYM_MODE (want 755), stamp-planted=$([ -e "$SYM_TARGET/identity-fallback-notice-shown" ] && echo yes || echo no), diag='$SYM_DIAG'"
 fi
 
+# --- #2842: control-byte sanitization + non-silent git-sourced attribution ---
+
+# Test 21: ALL control bytes stripped — FF (0x0c) / VT (0x0b) / DEL (0x7f)
+# previously survived the sanitizer and, forwarded raw into the
+# printf-assembled headers JSON, made it unparseable (MCP DoS). Red-on-revert
+# with the pre-#2842 tr set ' \t\r\n"\\'.
+CTRL_EMAIL="$(printf 'ceo@x.com\x0cF\x0bV\x7fD')"
+OUT=$(resolve_in_env "$NOGIT_REPO" HOME="$NOGIT_HOME" AXONFLOW_USER_EMAIL="$CTRL_EMAIL")
+if [ "$OUT" = "ceo@x.comFVD" ]; then
+  pass "control bytes (FF/VT/DEL) stripped from the resolved email"
+else
+  fail "control-byte case: got $(printf '%q' "$OUT"), want 'ceo@x.comFVD'"
+fi
+
+# Test 22: git-sourced attribution is NEVER SILENT — resolving via the git
+# fallback fires the once-per-day stderr notice naming the asserted email and
+# the unverified source; a SAME-identity second resolution is throttled; a
+# SAME-DAY identity SWITCH re-fires immediately (an earlier notice for the
+# developer's own address must not swallow a later attacker-influenced one);
+# AXONFLOW_IDENTITY_NOTICE=off suppresses it. The `date` shim (from test 8)
+# pins the day so runs straddling UTC midnight cannot flake.
+GITN_HOME="$(mktemp -d)"
+OUT=$(resolve_source_in_env "$GIT_REPO" HOME="$GITN_HOME" PATH="$SHIMBIN:$PATH")
+GITN_DIAG="$(cat "$RESOLVE_STDERR" 2>/dev/null)"
+case "$GITN_DIAG" in
+  *"resolved from git config"*"gituser@example.com"*UNVERIFIED*)
+    if [ "$OUT" = "gituser@example.com|git" ]; then
+      pass "git-sourced attribution fires the unverified-source notice"
+    else
+      fail "git-notice case: resolution wrong: '$OUT'"
+    fi ;;
+  *)
+    fail "git-source notice missing/wrong: '$GITN_DIAG'" ;;
+esac
+resolve_in_env "$GIT_REPO" HOME="$GITN_HOME" PATH="$SHIMBIN:$PATH" >/dev/null
+SECOND_GITN="$(cat "$RESOLVE_STDERR" 2>/dev/null)"
+if [ -z "$SECOND_GITN" ]; then
+  pass "git-source notice throttled to once per day for the SAME identity"
+else
+  fail "git-source notice not throttled: '$SECOND_GITN'"
+fi
+# Same HOME, same (shimmed) day, DIFFERENT git identity → must re-fire naming
+# the new address.
+resolve_in_env "$NONREPO" HOME="$GITN_HOME" PATH="$SHIMBIN:$PATH" GIT_CONFIG_GLOBAL="$GLOBAL_CFG" >/dev/null
+SWITCH_GITN="$(cat "$RESOLVE_STDERR" 2>/dev/null)"
+case "$SWITCH_GITN" in
+  *"globaluser@example.com"*)
+    pass "same-day git-identity SWITCH re-fires the notice for the new address" ;;
+  *)
+    fail "identity-switch case: notice did not re-fire: '$SWITCH_GITN'" ;;
+esac
+rm -rf "$GITN_HOME"
+GITN_OFF_HOME="$(mktemp -d)"
+resolve_in_env "$GIT_REPO" HOME="$GITN_OFF_HOME" AXONFLOW_IDENTITY_NOTICE=off >/dev/null
+OFF_GITN="$(cat "$RESOLVE_STDERR" 2>/dev/null)"
+if [ -z "$OFF_GITN" ]; then
+  pass "AXONFLOW_IDENTITY_NOTICE=off suppresses the git-source notice"
+else
+  fail "git-source notice fired despite notice=off: '$OFF_GITN'"
+fi
+rm -rf "$GITN_OFF_HOME"
+
+# Test 23: the #2842 forgery-shape regression — repo-local user.email differs
+# from the global one, env unset. Chosen policy: the MERGED read is KEPT
+# (repo-local wins — git's own identity semantics, and a normal clone cannot
+# inject a repo config), and the compensating control is the non-silent
+# notice naming exactly the identity being asserted.
+FORGE_HOME="$(mktemp -d)"
+OUT=$(resolve_source_in_env "$GIT_REPO" HOME="$FORGE_HOME" GIT_CONFIG_GLOBAL="$GLOBAL_CFG")
+FORGE_DIAG="$(cat "$RESOLVE_STDERR" 2>/dev/null)"
+if [ "$OUT" = "gituser@example.com|git" ]; then
+  pass "repo-local wins over global (documented merged-read policy)"
+else
+  fail "merged-read policy case: got '$OUT', want 'gituser@example.com|git'"
+fi
+case "$FORGE_DIAG" in
+  *"gituser@example.com"*)
+    pass "notice names the exact repo-local identity being asserted" ;;
+  *)
+    fail "notice did not name the asserted identity: '$FORGE_DIAG'" ;;
+esac
+rm -rf "$FORGE_HOME"
+
+# Test 24: env-sourced attribution stays SILENT (no git notice, no fallback
+# notice) — the notices exist to flag degraded/unverified sources only.
+ENV_HOME="$(mktemp -d)"
+resolve_in_env "$GIT_REPO" HOME="$ENV_HOME" AXONFLOW_USER_EMAIL="alice@example.com" >/dev/null
+ENV_DIAG="$(cat "$RESOLVE_STDERR" 2>/dev/null)"
+if [ -z "$ENV_DIAG" ]; then
+  pass "env-sourced attribution emits no notice"
+else
+  fail "env-sourced resolution emitted a notice: '$ENV_DIAG'"
+fi
+rm -rf "$ENV_HOME"
+
 echo ""
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

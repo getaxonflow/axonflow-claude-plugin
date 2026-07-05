@@ -330,9 +330,18 @@ Resolution precedence:
    ⚠️ It still only resolves **if git is installed and a `user.email` is
    actually configured** — on a fresh machine or container image neither is a
    given — and it is the *git* identity, **not** the Anthropic account, so it
-   can be silently wrong on shared machines or service accounts. Treat it as a
-   convenience default, not an authoritative identity, and do not rely on it
-   for fleet rollouts.
+   can be silently wrong on shared machines or service accounts. It is also
+   **repository-influenceable**: a repo obtained as an archive can ship a
+   `.git/config` with an arbitrary `user.email` that this fallback would
+   assert on your audit rows (a normal `git clone` cannot — config is not
+   cloned). Because of that, git-sourced attribution is **never silent**: the
+   hooks print a stderr notice naming the exact identity being asserted and
+   its unverified source — at most once per day **per asserted identity**; a
+   same-day identity change re-fires it immediately, and a second notice
+   naming a different address is exactly the repo-influenced red flag to
+   look for (same `AXONFLOW_IDENTITY_NOTICE=off` opt-out). Treat the
+   fallback as a convenience default, not an authoritative identity, and do
+   not rely on it for fleet rollouts or for trustworthy attribution.
 3. **Unset** — no `X-User-Email` header is sent; the agent falls back to its
    client-scoped synthetic id (never a blank/broken User column). So that you
    can see *why* attribution degraded, the hooks print a one-line notice to

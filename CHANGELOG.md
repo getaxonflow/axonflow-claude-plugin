@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+### Security
+
+- **Complete control-byte stripping in the identity sanitizer**
+  (axonflow-enterprise#2842; hardens the #2836 work below before it ships).
+  `_sanitize_user_email` stripped CR/LF/quote/backslash but not the other C0
+  control bytes — a `git config user.email` carrying a raw FF (0x0c), VT
+  (0x0b), or DEL (0x7f) survives git reads AND survived sanitization. The
+  `.mcp.json` inline headersHelper assembles its headers JSON with `printf`
+  (not jq), so a raw FF/VT (illegal inside a JSON string) landed unescaped
+  and Claude Code rejects the malformed value — the axonflow MCP connection
+  breaks, triggerable by repository contents alone. DEL is legal JSON but an
+  RFC 7230-illegal header byte; it and the other raw bytes were forwarded
+  into the HTTP headers and `audit_logs` on the hook planes. The sanitizer
+  (sourced helper AND
+  both inline `tr` calls) now strips `[:cntrl:]` plus space/quote/backslash —
+  verified against BSD, GNU, and busybox tr; lossless for real addresses.
+  (NUL needs no dedicated path: git truncates a config value at the NUL and
+  command substitution drops NUL bytes — pinned in tests.)
+- **Git-sourced attribution is no longer silent**
+  (axonflow-enterprise#2842). The git fallback adopts the merged-read
+  `user.email` (repo-local wins), which a repository's local configuration
+  can influence — a repo shipped as an archive can carry a `.git/config`
+  with an attacker-chosen address, silently redirecting the portal's User
+  attribution (a normal `git clone` cannot: config is not cloned). Fully
+  preventing this would break the legitimate per-repo git-identity workflow,
+  so the merged read is KEPT and the silent property is removed instead:
+  whenever attribution resolves from git, the hooks emit a once-per-UTC-day
+  stderr notice naming the exact identity being asserted and stating that it
+  is unverified and repo-influenceable — and the throttle is keyed on the
+  asserted identity, so a SAME-DAY identity switch re-fires immediately (an
+  earlier notice for the developer's own address cannot swallow a later
+  attacker-influenced one). `AXONFLOW_USER_EMAIL` (managed settings / MDM)
+  remains the only trustworthy source. Separate throttle stamp from the
+  identity-absent notice; same `AXONFLOW_IDENTITY_NOTICE=off` opt-out;
+  hooks-only (headersHelper stderr is not surfaced by Claude Code).
+  Tests: control-byte matrix in `tests/test-user-identity.sh` +
+  `tests/test-mcp-headers.sh` (the REAL inline, driven from a repo whose
+  repo-local `user.email` carries FF/VT/DEL and NUL); git-notice
+  fire/throttle/opt-out + repo-local-vs-global policy pins;
+  `tests/test-user-email-header-wire.sh` asserts the REAL pre-tool hook
+  sends the git identity AND fires the notice; `runtime-e2e/
+  developer-identity/` grew a control-byte leg (cleaned address lands in
+  `audit_logs`, raw byte stored nowhere) and asserts the git leg's notice
+  against a live stack.
+
 ### Changed
 
 - **Hardened per-developer identity resolution on the identity-absent path**
