@@ -110,10 +110,19 @@ _axonflow_identity_fallback_notice() {
     # Stamp content is a bare UTC date — nothing sensitive lands in tmp.
     stamp_dir="${TMPDIR:-/tmp}/axonflow-identity-${UID:-0}"
     mkdir -p "$stamp_dir" 2>/dev/null || stamp_dir=""
-    # Shared-/tmp hygiene: refuse a pre-existing dir another local user owns
-    # (they could pre-stamp today's date to suppress the diagnostic, or plant
-    # a symlink at the stamp path). Printing every time beats writing there.
-    if [ -n "$stamp_dir" ] && [ ! -O "$stamp_dir" ]; then
+    # Shared-/tmp hygiene. The stamp path is predictable, so a local attacker
+    # may pre-plant it. Reject two ways it can be abused, in order:
+    #   1. A SYMLINK at the path — `[ -O ]` follows the link, so a symlink
+    #      aimed at a directory WE own would otherwise pass the owner check
+    #      and make the chmod/write below land on the link target (arbitrary
+    #      chmod 0700 + a stray stamp file in a victim-chosen dir). `[ -h ]`
+    #      does not dereference, so test it BEFORE the owner check and refuse
+    #      any symlink outright.
+    #   2. A real dir another local user owns — they could pre-stamp today's
+    #      date to suppress the diagnostic. `[ -O ]` (dereference is moot now,
+    #      symlinks are already gone) rejects a foreign-owned target.
+    # Printing the notice every time beats writing to an unsafe location.
+    if [ -n "$stamp_dir" ] && { [ -h "$stamp_dir" ] || [ ! -O "$stamp_dir" ]; }; then
       stamp_dir=""
     fi
   fi

@@ -299,6 +299,26 @@ case "$DIAG" in
 esac
 rm -rf "$NOGIT_DIAG_HOME"
 
+# Test 20: shared-/tmp symlink hygiene — when HOME is unwritable the notice
+# falls back to ${TMPDIR}/axonflow-identity-<uid>. A local attacker can
+# pre-plant that predictable path as a symlink aimed at a directory the VICTIM
+# owns; `[ -O ]` dereferences, so without a `[ -h ]` pre-check the fallback
+# would chmod 0700 the link target and drop a stamp file in it. Pin that a
+# symlink at the stamp path is refused: the target is left untouched (not
+# chmod'd, no stamp written) and the diagnostic still fires (degrade-loud).
+SYM_TMP="$WORK/symtmp"; mkdir -p "$SYM_TMP"
+SYM_TARGET="$WORK/sym-victim-target"; mkdir -p "$SYM_TARGET"; chmod 0755 "$SYM_TARGET"
+ln -s "$SYM_TARGET" "$SYM_TMP/axonflow-identity-$(id -u)"
+SYM_DIAG=$( env -u AXONFLOW_USER_EMAIL HOME=/nonexistent-axonflow-$$ TMPDIR="$SYM_TMP" \
+  bash -c '. "'"$SCRIPT_PATH"'"; _axonflow_find_git() { return 1; }; resolve_user_identity' 2>&1 )
+SYM_MODE="$(stat -c %a "$SYM_TARGET" 2>/dev/null || stat -f %Lp "$SYM_TARGET" 2>/dev/null)"
+if [ "$SYM_MODE" = "755" ] && [ ! -e "$SYM_TARGET/identity-fallback-notice-shown" ] \
+   && printf '%s' "$SYM_DIAG" | grep -q "No developer identity resolved"; then
+  pass "symlink at tmp stamp path refused → target untouched, notice still fires"
+else
+  fail "symlink-hygiene case: target mode=$SYM_MODE (want 755), stamp-planted=$([ -e "$SYM_TARGET/identity-fallback-notice-shown" ] && echo yes || echo no), diag='$SYM_DIAG'"
+fi
+
 echo ""
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

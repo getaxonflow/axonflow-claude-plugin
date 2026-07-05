@@ -28,8 +28,12 @@
   - emits a **once-per-UTC-day stderr diagnostic** when no identity resolves,
     naming the reason and the fix (`AXONFLOW_USER_EMAIL` via managed settings /
     MDM is the reliable fleet path). The throttle stamp falls back to a
-    per-uid tmp dir when HOME is unset/unwritable. Suppress with
-    `AXONFLOW_IDENTITY_NOTICE=off`;
+    per-uid tmp dir when HOME is unset/unwritable — which, being a predictable
+    shared-`/tmp` path, is symlink-hardened: a link pre-planted at the stamp
+    path is refused via a `[ -h ]` pre-check (before the `[ -O ]` owner check,
+    which follows symlinks) so the throttle's `chmod`/write can never be
+    redirected onto a victim-owned directory; the notice just prints every
+    time instead. Suppress with `AXONFLOW_IDENTITY_NOTICE=off`;
   - exports `AXONFLOW_USER_IDENTITY_SOURCE` (`env` | `git` | `none`) alongside
     `AXONFLOW_USER_EMAIL_RESOLVED`.
   Source order is unchanged (env var → git → unset/header omitted).
@@ -42,7 +46,8 @@
   Tests: `tests/test-user-identity.sh` grew the identity-ABSENT matrix
   (non-repo cwd, corrupt repo, dubious-ownership repo, deleted cwd,
   global-only, local-vs-global, blank env var, stripped-PATH probe, shim-guard
-  wiring, diagnostic throttle/opt-out); `tests/test-mcp-headers.sh` pins the
+  wiring, diagnostic throttle/opt-out, tmp-stamp symlink refusal);
+  `tests/test-mcp-headers.sh` pins the
   inline port (blank-env fall-through, corrupt-repo rescue);
   `tests/test-user-email-header-wire.sh` now asserts the REAL hooks fire the
   diagnostic when no identity is available and stay silent when one is.
