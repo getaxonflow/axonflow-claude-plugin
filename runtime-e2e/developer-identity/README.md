@@ -1,13 +1,20 @@
 # developer-identity — runtime E2E
 
-**Asserts:** with `AXONFLOW_USER_EMAIL` set and a `session_id` in the hook stdin,
-the plugin's real hook scripts (`pre-tool-check.sh` → `check_policy`,
-`post-tool-audit.sh` → `audit_tool_call`) forward `X-User-Email` + `X-Session-Id`
-to a live AxonFlow agent, and the resulting canonical `audit_logs` rows on BOTH
-planes carry `user_email = <the developer>` AND `session_id = <the session>` in
-their first-class columns (issue #2753/#2754). Verified by reading the rows back
-from the platform DB — no mocks, no stubs; the agent + orchestrator are the real
-stack.
+**Asserts** (issues #2753/#2754; identity-absent hardening
+axonflow-enterprise#2836), by driving the plugin's real hook scripts
+(`pre-tool-check.sh` → `check_policy`, `post-tool-audit.sh` →
+`audit_tool_call`) against a live AxonFlow agent and reading the canonical
+`audit_logs` rows back from the platform DB — no mocks, no stubs:
+
+1. **env identity:** with `AXONFLOW_USER_EMAIL` set and a `session_id` in the
+   hook stdin, rows on BOTH planes carry `user_email = <the developer>` AND
+   `session_id = <the session>` in their first-class columns.
+2. **identity-ABSENT** (the unconfigured-fleet state — no env var, no git
+   identity, non-repo cwd): governed rows are still written, they degrade to
+   the client-scoped id (never blank/NULL, no leaked identity), and the hook
+   fires the one-line stderr diagnostic explaining why.
+3. **git fallback:** with only a git `user.email` configured, the hardened
+   resolution carries the git identity through both planes.
 
 **Prereqs:** `jq`, `curl`, `psql` on PATH; a live agent at `$AXONFLOW_ENDPOINT`
 (default `http://localhost:8080`); an enterprise Basic credential

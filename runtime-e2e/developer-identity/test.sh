@@ -113,6 +113,97 @@ fi
 echo "--- audit_logs rows for this run ---"
 query "SELECT request_type, policy_decision, user_email, session_id FROM audit_logs WHERE session_id='$SID' ORDER BY timestamp;" || true
 
+# ---------------------------------------------------------------------------
+# #2836 leg 2: identity-ABSENT — the real-world unconfigured-fleet state (no
+# AXONFLOW_USER_EMAIL, no git identity, non-repo cwd). The hooks must still
+# send governed traffic with the X-User-Email header OMITTED, the agent must
+# degrade to its client-scoped identity (never a blank/NULL user_email), and
+# the once-per-day stderr diagnostic must fire so the degradation is VISIBLE —
+# the silent version of this state is exactly how epic #2832 went unnoticed.
+# ---------------------------------------------------------------------------
+SID_ABSENT="e2e-session-absent-$(date +%s)-$RANDOM"
+ABSENT_HOME="$(mktemp -d)"
+HOOK_ERR="$(mktemp)"
+trap 'rm -rf "$ABSENT_HOME" "$HOOK_ERR"' EXIT
+echo "--- Driving governed hooks with NO identity (session=$SID_ABSENT) ---"
+
+echo "{\"session_id\":\"$SID_ABSENT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
+  | ( cd "$ABSENT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$ABSENT_HOME" \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      "$PRE_HOOK" >/dev/null 2>>"$HOOK_ERR" )
+echo "{\"session_id\":\"$SID_ABSENT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+  | ( cd "$ABSENT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$ABSENT_HOME" \
+      GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      "$POST_HOOK" >/dev/null 2>>"$HOOK_ERR" )
+sleep 4
+
+# Governed traffic still flowed (identity-absent must never drop governance).
+ROWS=$(query "SELECT count(*) FROM audit_logs WHERE session_id='$SID_ABSENT';")
+if [ "${ROWS:-0}" -ge 1 ]; then
+  echo "PASS: identity-absent — governed rows still written (count=$ROWS)"
+else
+  echo "FAIL: identity-absent — no audit_logs rows for session_id=$SID_ABSENT"
+  errors=$((errors + 1))
+fi
+
+# Degradation contract: client-scoped attribution, never blank/NULL and never
+# a leaked test identity.
+BLANK=$(query "SELECT count(*) FROM audit_logs WHERE session_id='$SID_ABSENT' AND (user_email IS NULL OR user_email='');")
+LEAK=$(query "SELECT count(*) FROM audit_logs WHERE session_id='$SID_ABSENT' AND user_email LIKE '%@example.com';")
+if [ "${ROWS:-0}" -ge 1 ] && [ "${BLANK:-1}" -eq 0 ] && [ "${LEAK:-1}" -eq 0 ]; then
+  echo "PASS: identity-absent — rows degrade to the client-scoped id (no blank, no leak)"
+else
+  echo "FAIL: identity-absent degradation broken (blank=$BLANK leak=$LEAK):"
+  query "SELECT request_type, user_email FROM audit_logs WHERE session_id='$SID_ABSENT';" || true
+  errors=$((errors + 1))
+fi
+
+# The visibility half of #2836: the REAL hook told the operator WHY.
+if grep -q "No developer identity resolved" "$HOOK_ERR"; then
+  echo "PASS: identity-absent — stderr diagnostic fired"
+else
+  echo "FAIL: identity-absent — diagnostic missing from hook stderr: $(cat "$HOOK_ERR")"
+  errors=$((errors + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# #2836 leg 3: git-fallback — no AXONFLOW_USER_EMAIL, but a git user.email is
+# configured. The hardened resolution (merged → --global read) must carry the
+# git identity through the REAL hooks into the canonical audit rows.
+# ---------------------------------------------------------------------------
+SID_GIT="e2e-session-git-$(date +%s)-$RANDOM"
+GIT_EMAIL="e2e-git-$(date +%s)-$RANDOM@example.com"
+GIT_HOME="$(mktemp -d)"
+GCFG="$GIT_HOME/gitconfig"
+printf '[user]\n\temail = %s\n' "$GIT_EMAIL" > "$GCFG"
+trap 'rm -rf "$ABSENT_HOME" "$HOOK_ERR" "$GIT_HOME"' EXIT
+echo "--- Driving governed hooks with git-only identity ($GIT_EMAIL, session=$SID_GIT) ---"
+
+echo "{\"session_id\":\"$SID_GIT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
+  | ( cd "$GIT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$GIT_HOME" \
+      GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      "$PRE_HOOK" >/dev/null 2>&1 )
+echo "{\"session_id\":\"$SID_GIT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+  | ( cd "$GIT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$GIT_HOME" \
+      GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      "$POST_HOOK" >/dev/null 2>&1 )
+sleep 4
+
+GIT_CHK=$(query "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$GIT_EMAIL' AND session_id='$SID_GIT';")
+if [ "${GIT_CHK:-0}" -ge 1 ]; then
+  echo "PASS: git-fallback — check_policy row carries the git user.email"
+else
+  echo "FAIL: git-fallback — no mcp_check_policy row with user_email=$GIT_EMAIL AND session_id=$SID_GIT"
+  errors=$((errors + 1))
+fi
+GIT_AUD=$(query "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND user_email='$GIT_EMAIL' AND session_id='$SID_GIT';")
+if [ "${GIT_AUD:-0}" -ge 1 ]; then
+  echo "PASS: git-fallback — audit_tool_call row carries the git user.email"
+else
+  echo "FAIL: git-fallback — no tool_call_audit row with user_email=$GIT_EMAIL AND session_id=$SID_GIT"
+  errors=$((errors + 1))
+fi
+
 if [ "$errors" -gt 0 ]; then
   echo ""
   echo "FAIL: $errors identity-outcome assertion(s) failed"
@@ -120,4 +211,4 @@ if [ "$errors" -gt 0 ]; then
 fi
 
 echo ""
-echo "PASS: developer identity end-to-end — user_email + session_id populated on both governed planes"
+echo "PASS: developer identity end-to-end — env identity, identity-absent degradation + diagnostic, and git fallback all verified on the real stack"

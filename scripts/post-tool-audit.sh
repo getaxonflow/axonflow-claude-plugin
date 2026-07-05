@@ -78,10 +78,11 @@ if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
   AUTH_HEADER+=(-H "X-License-Token: ${AXONFLOW_LICENSE_TOKEN}")
 fi
 
-# Per-developer identity (issue #2754) — mirror pre-tool-check.sh so the
-# post-tool audit_tool_call POST AND the check_output scan below (both reuse
-# AUTH_HEADER) attribute the row to the real developer via X-User-Email.
-# Omitted entirely when unset (no empty header).
+# Per-developer identity (issue #2754; hardened per #2836) — mirror
+# pre-tool-check.sh so the post-tool audit_tool_call POST AND the check_output
+# scan below (both reuse AUTH_HEADER) attribute the row to the real developer
+# via X-User-Email. Omitted entirely when unset (no empty header); the helper
+# emits a once-per-day stderr notice on the identity-absent path.
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/user-identity.sh"
 resolve_user_identity

@@ -205,6 +205,40 @@ else
   echo "FAIL: quote/backslash not sanitized, JSON may be broken: $OUT"; fail=1
 fi
 
+# ---------------------------------------------------------------------------
+# #2836 identity-absent hardening — the inline resolver must match
+# scripts/user-identity.sh semantics (sanitize-first fall-through, merged →
+# --global git read). These pin the inline port; the bash impl is covered by
+# tests/test-user-identity.sh.
+# ---------------------------------------------------------------------------
+
+# 16) blank (whitespace-only) AXONFLOW_USER_EMAIL falls through to the git
+#     fallback instead of silently suppressing the header. Global git identity
+#     injected deterministically via GIT_CONFIG_GLOBAL.
+GCFG="$(mktemp)"
+printf '[user]\n\temail = glob@example.com\n' > "$GCFG"
+OUT="$(env -u AXONFLOW_AUTH HOME=/nonexistent-empty-home AXONFLOW_USER_EMAIL='   ' \
+  GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null /bin/sh -c "cd / && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Email" // empty')" = "glob@example.com" ]; then
+  echo "PASS: blank AXONFLOW_USER_EMAIL falls through to the git fallback"
+else
+  echo "FAIL: blank AXONFLOW_USER_EMAIL did not fall through: $OUT"; fail=1
+fi
+
+# 17) corrupt .git/config cwd → the merged read dies, the explicit --global
+#     read still recovers the identity (the #2836 broken-repo class).
+BROKEN="$(mktemp -d)"
+git -C "$BROKEN" init -q >/dev/null 2>&1 || true
+printf '[user\n' > "$BROKEN/.git/config"   # unclosed section → fatal: bad config
+OUT="$(env -u AXONFLOW_AUTH -u AXONFLOW_USER_EMAIL HOME=/nonexistent-empty-home \
+  GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null /bin/sh -c "cd '$BROKEN' && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Email" // empty')" = "glob@example.com" ]; then
+  echo "PASS: corrupt .git/config cwd → --global read recovers the identity"
+else
+  echo "FAIL: corrupt-repo cwd lost the identity: $OUT"; fail=1
+fi
+rm -rf "$BROKEN" "$GCFG"
+
 echo ""
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: .mcp.json headersHelper unit test"

@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Wire test for X-User-Email on the HOOK surfaces (issue #2754).
+# Wire test for X-User-Email on the HOOK surfaces (issue #2754; identity-
+# absent hardening #2836).
 #
 # Unlike test-user-identity.sh (helper unit) and test-mcp-headers.sh (the MCP
 # headersHelper), this drives the ACTUAL hook scripts against a header-capturing
 # mock agent and asserts the outbound requests carry X-User-Email when
-# AXONFLOW_USER_EMAIL is set — and DON'T when it is unset. Covers the two hook
-# surfaces the customer portal attribution depends on:
+# AXONFLOW_USER_EMAIL is set — and DON'T when it is unset (the real-world
+# identity-absent fleet state: no env var, no git config, non-repo cwd), in
+# which case the once-per-day stderr diagnostic must fire so an admin can see
+# WHY attribution degraded. Covers the two hook surfaces the customer portal
+# attribution depends on:
 #   - pre-tool-check.sh  → check_policy  (PreToolUse)
 #   - post-tool-audit.sh → check_output / audit_tool_call (PostToolUse)
 #
@@ -77,20 +81,36 @@ ENDPOINT="http://127.0.0.1:$PORT"
 # isolates the test to the AXONFLOW_USER_EMAIL env path. The "unset" cases thus
 # assert "no identity available at all → no header", not "git happened to have
 # one". (The git-fallback path itself is covered by test-user-identity.sh.)
+#
+# Each run gets a FRESH HOME (#2836): hermetic (no host ~/.config/axonflow
+# credentials or ~/.cache stamps leak in) and it makes the identity-absent
+# stderr diagnostic deterministic — the once-per-day stamp can never have been
+# written yet. Hook stderr is captured to $HOOK_STDERR for assertion.
+HOOK_STDERR="$WORK/hook-stderr.log"
+RUN_N=0
 run_hook() {
   local hook="$1" email="$2"
+  RUN_N=$((RUN_N+1))
+  local run_home="$WORK/home-$RUN_N"
+  mkdir -p "$run_home"
   # session_id is always present in the hook stdin (Claude Code provides it) →
   # the hooks must emit X-Session-Id (#2753) regardless of the email path.
   local input='{"session_id":"sess-wire-123","tool_name":"Write","tool_input":{"file_path":"/tmp/x.txt","content":"hello world"},"tool_response":{"success":true}}'
   if [ -n "$email" ]; then
-    ( cd "$WORK" && echo "$input" | env AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_AUTH="" \
+    ( cd "$WORK" && echo "$input" | env HOME="$run_home" AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_AUTH="" \
         AXONFLOW_TELEMETRY=off GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
-        AXONFLOW_USER_EMAIL="$email" "$hook" >/dev/null 2>&1 )
+        AXONFLOW_USER_EMAIL="$email" "$hook" >/dev/null 2>"$HOOK_STDERR" )
   else
-    ( cd "$WORK" && echo "$input" | env -u AXONFLOW_USER_EMAIL AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_AUTH="" \
-        AXONFLOW_TELEMETRY=off GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$hook" >/dev/null 2>&1 )
+    ( cd "$WORK" && echo "$input" | env -u AXONFLOW_USER_EMAIL HOME="$run_home" AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_AUTH="" \
+        AXONFLOW_TELEMETRY=off GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null "$hook" >/dev/null 2>"$HOOK_STDERR" )
   fi
   sleep 0.4  # let any backgrounded audit curl flush to the capture log
+}
+
+# stderr_has_identity_diag — true if the captured hook stderr carries the
+# identity-absent diagnostic (#2836).
+stderr_has_identity_diag() {
+  grep -q "No developer identity resolved" "$HOOK_STDERR" 2>/dev/null
 }
 
 # captured_has_email <email> — true if any captured request carried
@@ -123,14 +143,25 @@ if captured_has_session "sess-wire-123"; then
 else
   fail "pre-tool-check.sh did not send X-Session-Id: $(cat "$CAP")"
 fi
+if stderr_has_identity_diag; then
+  fail "pre-tool-check.sh fired the identity diagnostic despite an identity being set"
+else
+  pass "pre-tool-check.sh stays silent about identity when AXONFLOW_USER_EMAIL is set"
+fi
 
-# --- pre-tool-check.sh with NO email → header absent ---
+# --- pre-tool-check.sh with NO email (identity-ABSENT: no env, no git config,
+# non-repo cwd) → header absent + stderr diagnostic fires (#2836) ---
 : > "$CAP"
 run_hook "$PRE_HOOK" ""
 if captured_any_email; then
   fail "pre-tool-check.sh sent X-User-Email with no identity: $(cat "$CAP")"
 else
   pass "pre-tool-check.sh omits X-User-Email when unset"
+fi
+if stderr_has_identity_diag; then
+  pass "pre-tool-check.sh fires the identity-absent stderr diagnostic"
+else
+  fail "pre-tool-check.sh identity-absent diagnostic missing: $(cat "$HOOK_STDERR" 2>/dev/null)"
 fi
 
 # --- post-tool-audit.sh with email set ---
@@ -146,14 +177,25 @@ if captured_has_session "sess-wire-123"; then
 else
   fail "post-tool-audit.sh did not send X-Session-Id: $(cat "$CAP")"
 fi
+if stderr_has_identity_diag; then
+  fail "post-tool-audit.sh fired the identity diagnostic despite an identity being set"
+else
+  pass "post-tool-audit.sh stays silent about identity when AXONFLOW_USER_EMAIL is set"
+fi
 
-# --- post-tool-audit.sh with NO email → header absent ---
+# --- post-tool-audit.sh with NO email (identity-ABSENT) → header absent +
+# stderr diagnostic fires (#2836) ---
 : > "$CAP"
 run_hook "$POST_HOOK" ""
 if captured_any_email; then
   fail "post-tool-audit.sh sent X-User-Email with no identity: $(cat "$CAP")"
 else
   pass "post-tool-audit.sh omits X-User-Email when unset"
+fi
+if stderr_has_identity_diag; then
+  pass "post-tool-audit.sh fires the identity-absent stderr diagnostic"
+else
+  fail "post-tool-audit.sh identity-absent diagnostic missing: $(cat "$HOOK_STDERR" 2>/dev/null)"
 fi
 
 echo ""
