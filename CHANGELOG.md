@@ -2,6 +2,56 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Hardened per-developer identity resolution on the identity-absent path**
+  (axonflow-enterprise#2836, epic #2832). v1.8.0's `git config user.email`
+  fallback was a single merged read from the hook's working directory, which
+  silently resolved nothing when the repo's `.git/config` was corrupt or the
+  working directory had been deleted — and when nothing resolved, the plugin
+  degraded to the client-scoped synthetic id without telling anyone (the
+  exact way an unconfigured fleet goes unnoticed). `scripts/user-identity.sh`
+  now:
+  - falls back from the merged read to an explicit `git config --global
+    user.email` read that survives a corrupt `.git/config` and a deleted cwd
+    (a dubious-ownership repo needs no rescue: git itself skips the repo-local
+    config and the merged read returns the global value — pinned in tests via
+    git's `GIT_TEST_ASSUME_DIFFERENT_OWNER` knob);
+  - probes standard install locations for git when the hook PATH is stripped
+    (guarding against the macOS `/usr/bin/git` Xcode shim popping a GUI dialog
+    when no toolchain is installed). The probe targets git specifically;
+    resolution still assumes coreutils on PATH, which the hooks already
+    require (they exit before resolution when jq/curl are missing);
+  - treats a set-but-blank `AXONFLOW_USER_EMAIL` as unset and falls through to
+    the git fallback instead of silently suppressing the header — a behavior
+    change for that input class (previously the header was simply omitted);
+  - emits a **once-per-UTC-day stderr diagnostic** when no identity resolves,
+    naming the reason and the fix (`AXONFLOW_USER_EMAIL` via managed settings /
+    MDM is the reliable fleet path). The throttle stamp falls back to a
+    per-uid tmp dir when HOME is unset/unwritable — which, being a predictable
+    shared-`/tmp` path, is symlink-hardened: a link pre-planted at the stamp
+    path is refused via a `[ -h ]` pre-check (before the `[ -O ]` owner check,
+    which follows symlinks) so the throttle's `chmod`/write can never be
+    redirected onto a victim-owned directory; the notice just prints every
+    time instead. Suppress with `AXONFLOW_IDENTITY_NOTICE=off`;
+  - exports `AXONFLOW_USER_IDENTITY_SOURCE` (`env` | `git` | `none`) alongside
+    `AXONFLOW_USER_EMAIL_RESOLVED`.
+  Source order is unchanged (env var → git → unset/header omitted).
+  The **`.mcp.json` inline resolver** — the actual MCP-connection surface;
+  `headersHelper` cannot reference plugin scripts — ports the same hardened
+  resolution (sanitize-first fall-through, git probe + shim guard, merged →
+  `--global` read) as POSIX sh. It deliberately omits the stderr notice:
+  headersHelper stderr is not surfaced by Claude Code, so the hooks own the
+  operator-visible diagnostic.
+  Tests: `tests/test-user-identity.sh` grew the identity-ABSENT matrix
+  (non-repo cwd, corrupt repo, dubious-ownership repo, deleted cwd,
+  global-only, local-vs-global, blank env var, stripped-PATH probe, shim-guard
+  wiring, diagnostic throttle/opt-out, tmp-stamp symlink refusal);
+  `tests/test-mcp-headers.sh` pins the
+  inline port (blank-env fall-through, corrupt-repo rescue);
+  `tests/test-user-email-header-wire.sh` now asserts the REAL hooks fire the
+  diagnostic when no identity is available and stay silent when one is.
+
 ## [1.8.0] - 2026-07-02 — per-developer + per-session identity (X-User-Email / X-Session-Id)
 
 Pairs with platform **≥ 9.3.0**, which ingests `X-User-Email` and `X-Session-Id`

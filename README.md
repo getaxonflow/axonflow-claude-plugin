@@ -317,15 +317,31 @@ export AXONFLOW_USER_EMAIL=alice@your-company.com
 
 Resolution precedence:
 
-1. **`AXONFLOW_USER_EMAIL`** — the supported source. Claude Code does not expose
-   the logged-in Anthropic account email to plugins/hooks, so set this per
-   developer via your shell profile or fleet tooling (MDM / JumpCloud).
+1. **`AXONFLOW_USER_EMAIL`** — the supported source, and the **only reliable
+   path for a fleet**. Claude Code does not expose the logged-in Anthropic
+   account email to plugins/hooks, so set this per developer via managed
+   settings / MDM (fleet) or the shell profile (individual). A value that is
+   set but blank/whitespace-only falls through to the git fallback.
 2. **`git config user.email`** — a best-effort fallback used only when the env
-   var is unset. ⚠️ This is the *git* identity, **not** the Anthropic account,
-   so it can be silently wrong on shared machines or service accounts. Treat it
-   as a convenience default, not an authoritative identity.
+   var doesn't resolve. The plugin first does a merged read from the hook's
+   working directory (repo-local value wins; outside a repo git still returns
+   the global value), then an explicit `--global` read that survives failures
+   the merged read dies on (corrupt `.git/config`, deleted working directory).
+   ⚠️ It still only resolves **if git is installed and a `user.email` is
+   actually configured** — on a fresh machine or container image neither is a
+   given — and it is the *git* identity, **not** the Anthropic account, so it
+   can be silently wrong on shared machines or service accounts. Treat it as a
+   convenience default, not an authoritative identity, and do not rely on it
+   for fleet rollouts.
 3. **Unset** — no `X-User-Email` header is sent; the agent falls back to its
-   client-scoped synthetic id (never a blank/broken User column).
+   client-scoped synthetic id (never a blank/broken User column). So that you
+   can see *why* attribution degraded, the hooks print a one-line notice to
+   stderr — at most once per day — naming the missing source and the fix.
+   Suppress it with `AXONFLOW_IDENTITY_NOTICE=off` if your fleet intentionally
+   runs without per-developer identity.
+
+The resolved source is exported as `AXONFLOW_USER_IDENTITY_SOURCE`
+(`env` | `git` | `none`) for scripting/debugging.
 
 Identity here is *asserted*, not cryptographically verified — it improves audit
 visibility; it is not an authentication boundary.

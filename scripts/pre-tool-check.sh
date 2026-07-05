@@ -108,12 +108,14 @@ if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
   echo "[AxonFlow] Pro tier active (X-License-Token configured)" >&2
 fi
 
-# Per-developer identity (issue #2754). Resolve AXONFLOW_USER_EMAIL (→ git
-# fallback) and, when present, ship it as X-User-Email so the agent attributes
-# every governed request below — the check_policy POST AND the blocked/redacted
-# audit_tool_call POSTs (all reuse AUTH_HEADER) — to a real developer instead of
-# the synthetic "mcp-client:<org>" id. Omitted entirely when unset (no empty
-# header); the agent then degrades to the synthetic id, never a hard NULL.
+# Per-developer identity (issue #2754; hardened per #2836). Resolve
+# AXONFLOW_USER_EMAIL (→ git fallback: repo-local then global) and, when
+# present, ship it as X-User-Email so the agent attributes every governed
+# request below — the check_policy POST AND the blocked/redacted
+# audit_tool_call POSTs (all reuse AUTH_HEADER) — to a real developer instead
+# of the synthetic "mcp-client:<org>" id. Omitted entirely when unset (no
+# empty header); the agent then degrades to the synthetic id, never a hard
+# NULL, and the helper emits a once-per-day stderr notice saying why.
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/user-identity.sh"
 resolve_user_identity

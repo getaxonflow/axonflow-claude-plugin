@@ -52,9 +52,16 @@ resolve_license_token
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/client-header.sh"
 
-# Per-developer identity (issue #2754): resolve AXONFLOW_USER_EMAIL (→ git
-# fallback) so MCP-server traffic carries X-User-Email and the agent attributes
-# the audit row to a real developer. Same env-then-git precedence as the hooks.
+# Per-developer identity (issue #2754; hardened per #2836): resolve
+# AXONFLOW_USER_EMAIL (→ git fallback: repo-local then global) so MCP-server
+# traffic carries X-User-Email and the agent attributes the audit row to a
+# real developer. Same env-then-git precedence as the hooks; the identity-
+# absent diagnostic goes to stderr only (stdout here is the headers JSON).
+# SYNC NOTE: the .mcp.json inline resolver ports the same hardened resolution
+# (sanitize-first fall-through, git probe + Darwin shim guard, merged→global
+# read) as POSIX sh, but deliberately OMITS the stderr notice — headersHelper
+# stderr is not surfaced by Claude Code, so the hooks own the operator-visible
+# diagnostic. tests/test-mcp-headers.sh pins the inline's behavior.
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/user-identity.sh"
 resolve_user_identity
