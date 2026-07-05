@@ -239,6 +239,48 @@ else
 fi
 rm -rf "$BROKEN" "$GCFG"
 
+# ---------------------------------------------------------------------------
+# #2842 control-byte sanitization — the inline assembles the headers JSON with
+# printf (not jq), so any C0 control byte surviving sanitization lands raw
+# inside the JSON string and Claude Code rejects the whole headers value → the
+# axonflow MCP connection breaks. The inline is the REAL MCP surface: these
+# drive it from inside a repo whose repo-local user.email carries the bytes.
+# ---------------------------------------------------------------------------
+
+# 18) FF (0x0c) + VT (0x0b) + DEL (0x7f) in the repo-local user.email — all
+#     survive git reads (verified) and previously survived sanitization.
+#     Output must be VALID JSON with the control bytes removed.
+#     Red-on-revert with the pre-#2842 tr set ' \t\r\n"\\'.
+CTRL_REPO="$(mktemp -d)"
+git -C "$CTRL_REPO" init -q >/dev/null 2>&1 || true
+printf '[user]\n\temail = ceo@x.com\x0cF\x0bV\x7fD\n' > "$CTRL_REPO/.git/config"
+OUT="$(env -u AXONFLOW_AUTH -u AXONFLOW_USER_EMAIL HOME=/nonexistent-empty-home \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null /bin/sh -c "cd '$CTRL_REPO' && $HH")"
+if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1 \
+   && [ "$(printf '%s' "$OUT" | jq -r '."X-User-Email" // empty')" = "ceo@x.comFVD" ]; then
+  echo "PASS: control bytes in repo-local user.email stripped, headers JSON stays valid"
+else
+  echo "FAIL: control-byte email broke the headers JSON or survived: $(printf '%q' "$OUT")"; fail=1
+fi
+rm -rf "$CTRL_REPO"
+
+# 19) NUL (0x00) in the repo-local user.email — git itself truncates the
+#     value at the NUL (verified) and command substitution drops NUL bytes,
+#     so the byte can never reach the JSON; pin that the output is valid and
+#     carries the truncated address.
+NUL_REPO="$(mktemp -d)"
+git -C "$NUL_REPO" init -q >/dev/null 2>&1 || true
+printf '[user]\n\temail = ceo@x.com\x00N\n' > "$NUL_REPO/.git/config"
+OUT="$(env -u AXONFLOW_AUTH -u AXONFLOW_USER_EMAIL HOME=/nonexistent-empty-home \
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null /bin/sh -c "cd '$NUL_REPO' && $HH")"
+if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1 \
+   && [ "$(printf '%s' "$OUT" | jq -r '."X-User-Email" // empty')" = "ceo@x.com" ]; then
+  echo "PASS: NUL in repo-local user.email → git-truncated value, headers JSON stays valid"
+else
+  echo "FAIL: NUL-bearing email broke the headers JSON: $(printf '%q' "$OUT")"; fail=1
+fi
+rm -rf "$NUL_REPO"
+
 echo ""
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: .mcp.json headersHelper unit test"

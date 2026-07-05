@@ -198,6 +198,32 @@ else
   fail "post-tool-audit.sh identity-absent diagnostic missing: $(cat "$HOOK_STDERR" 2>/dev/null)"
 fi
 
+# --- pre-tool-check.sh with a GIT-only identity (#2842): the header carries
+# the git email AND the unverified-source notice fires on the REAL hook ---
+: > "$CAP"
+RUN_N=$((RUN_N+1))
+GIT_RUN_HOME="$WORK/home-$RUN_N"
+mkdir -p "$GIT_RUN_HOME"
+GIT_WIRE_CFG="$WORK/wire-gitconfig"
+printf '[user]\n\temail = gitwire@example.com\n' > "$GIT_WIRE_CFG"
+INPUT_GIT='{"session_id":"sess-wire-123","tool_name":"Write","tool_input":{"file_path":"/tmp/x.txt","content":"hello world"},"tool_response":{"success":true}}'
+( cd "$WORK" && echo "$INPUT_GIT" | env -u AXONFLOW_USER_EMAIL HOME="$GIT_RUN_HOME" \
+    AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_AUTH="" AXONFLOW_TELEMETRY=off \
+    GIT_CONFIG_GLOBAL="$GIT_WIRE_CFG" GIT_CONFIG_SYSTEM=/dev/null \
+    "$PRE_HOOK" >/dev/null 2>"$HOOK_STDERR" )
+sleep 0.4
+if captured_has_email "gitwire@example.com"; then
+  pass "pre-tool-check.sh sends the git-fallback identity as X-User-Email"
+else
+  fail "pre-tool-check.sh did not send the git-fallback identity: $(cat "$CAP")"
+fi
+if grep -q "resolved from git config" "$HOOK_STDERR" 2>/dev/null \
+   && grep -q "gitwire@example.com" "$HOOK_STDERR" 2>/dev/null; then
+  pass "pre-tool-check.sh fires the unverified-git-source notice naming the identity"
+else
+  fail "pre-tool-check.sh git-source notice missing: $(cat "$HOOK_STDERR" 2>/dev/null)"
+fi
+
 echo ""
 echo "Summary: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

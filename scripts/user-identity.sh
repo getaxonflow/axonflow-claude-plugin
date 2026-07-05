@@ -37,6 +37,9 @@
 #      .git/config or a deleted cwd. Resolution assumes coreutils (tr) on
 #      PATH; the calling hooks already exit before resolution when jq/curl are
 #      missing, so a PATH that strips coreutils never reaches this code.
+#      Git-sourced attribution is NEVER SILENT (#2842): a once-per-UTC-day
+#      stderr notice names the asserted identity and that the source is
+#      unverified/repo-influenceable.
 #   3. Unset — no X-User-Email header is sent (the callers omit it entirely
 #      rather than shipping an empty header). The agent then degrades to its
 #      client-scoped synthetic id, never a hard NULL. A once-per-UTC-day
@@ -47,12 +50,16 @@
 # (stdout is the hook protocol) — the diagnostic is stderr-only.
 
 # _sanitize_user_email strips characters a valid email never contains but which
-# could break a downstream sink: all whitespace (space/tab/CR/LF) defuses HTTP
-# header-splitting, and the double-quote + backslash are removed so the value is
-# safe to interpolate into the .mcp.json headersHelper's JSON output without
-# escaping. Lossless for real addresses.
+# could break a downstream sink: ALL control bytes ([:cntrl:] = 0x00–0x1F +
+# DEL, covering tab/CR/LF for HTTP header-splitting AND FF/VT/etc., which
+# would otherwise land raw inside the printf-assembled headers JSON and make
+# it unparseable — #2842), plus space, double-quote, and backslash so the
+# value is safe to interpolate into the .mcp.json headersHelper's JSON output
+# without escaping. Lossless for real addresses. Verified against BSD (macOS),
+# GNU, and busybox tr. (NUL never even reaches this point: git truncates a
+# config value at a NUL and command substitution drops NUL bytes.)
 _sanitize_user_email() {
-  printf '%s' "$1" | tr -d ' \t\r\n"\\'
+  printf '%s' "$1" | tr -d '[:cntrl:] "\\'
 }
 
 # _axonflow_git_usable <path> — guard against the macOS /usr/bin/git Xcode
@@ -75,7 +82,11 @@ _axonflow_git_usable() {
 # _axonflow_find_git — print a usable git executable path, or nothing (rc 1).
 # Hook environments occasionally run with a stripped PATH (managed-settings
 # env blocks, MDM launch contexts), so when the PATH lookup fails we probe the
-# standard install locations before giving up.
+# standard install locations before giving up. PATH is deliberately consulted
+# FIRST: it is not repo-controllable (opening a repository cannot alter the
+# hook process's PATH), so a poisoned PATH implies pre-existing env-write
+# access — already game over — while PATH-first honors legitimate non-standard
+# git installs (#2842).
 _axonflow_find_git() {
   local candidate found=""
   found="$(command -v git 2>/dev/null)" || found=""
@@ -88,58 +99,106 @@ _axonflow_find_git() {
   return 1
 }
 
-# _axonflow_identity_fallback_notice <reason> — one-line stderr diagnostic
-# emitted when no identity resolves, so a developer or fleet admin can see WHY
-# audit rows are about to attribute to the client-scoped id instead of a
-# person (the silent version of this is exactly how a mis-provisioned fleet
-# goes unnoticed — axonflow-enterprise#2832). Throttled to once per UTC day
-# via a stamp file (house pattern: upgrade-prompt.sh) so it cannot spam every
-# hook fire. When HOME is unset/unwritable (MDM / launchd / container
-# contexts — exactly the fleets this targets) the stamp falls back to a
-# per-uid tmp dir so the throttle still holds; only when NO stamp location is
-# writable does the notice print every time (visibility beats silence at that
-# point). The pre-tool and post-tool hooks racing on the very first fire can
-# double-print once — benign, the stamp settles it from then on. Suppress
-# entirely with AXONFLOW_IDENTITY_NOTICE=off.
-_axonflow_identity_fallback_notice() {
-  case "${AXONFLOW_IDENTITY_NOTICE:-}" in
-    off|0|false|no) return 0 ;;
-  esac
-  local stamp_dir="${HOME:-}/.cache/axonflow"
-  if ! mkdir -p "$stamp_dir" 2>/dev/null; then
-    # Stamp content is a bare UTC date — nothing sensitive lands in tmp.
-    stamp_dir="${TMPDIR:-/tmp}/axonflow-identity-${UID:-0}"
-    mkdir -p "$stamp_dir" 2>/dev/null || stamp_dir=""
+# _axonflow_identity_stamp_dir — print a SAFE stamp directory, or nothing when
+# no safe location exists. Prefers ~/.cache/axonflow; when HOME is
+# unset/unwritable (MDM / launchd / container contexts — exactly the fleets
+# this targets) falls back to a per-uid tmp dir so the once-per-day throttle
+# still holds.
+_axonflow_identity_stamp_dir() {
+  local d="${HOME:-}/.cache/axonflow"
+  if ! mkdir -p "$d" 2>/dev/null; then
+    # Stamp content is a UTC date plus, for the git-source notice, the
+    # asserted email (the throttle key) — mildly personal, so the fallback
+    # dir is owner-only (0700, ownership-checked, symlink-refused below) and
+    # the stamp file itself is chmod 0600 at write time.
+    d="${TMPDIR:-/tmp}/axonflow-identity-${UID:-0}"
+    mkdir -p "$d" 2>/dev/null || d=""
     # Shared-/tmp hygiene. The stamp path is predictable, so a local attacker
     # may pre-plant it. Reject two ways it can be abused, in order:
     #   1. A SYMLINK at the path — `[ -O ]` follows the link, so a symlink
     #      aimed at a directory WE own would otherwise pass the owner check
-    #      and make the chmod/write below land on the link target (arbitrary
+    #      and make the chmod/write land on the link target (arbitrary
     #      chmod 0700 + a stray stamp file in a victim-chosen dir). `[ -h ]`
     #      does not dereference, so test it BEFORE the owner check and refuse
     #      any symlink outright.
     #   2. A real dir another local user owns — they could pre-stamp today's
     #      date to suppress the diagnostic. `[ -O ]` (dereference is moot now,
     #      symlinks are already gone) rejects a foreign-owned target.
-    # Printing the notice every time beats writing to an unsafe location.
-    if [ -n "$stamp_dir" ] && { [ -h "$stamp_dir" ] || [ ! -O "$stamp_dir" ]; }; then
-      stamp_dir=""
+    # Printing a notice every time beats writing to an unsafe location.
+    if [ -n "$d" ] && { [ -h "$d" ] || [ ! -O "$d" ]; }; then
+      d=""
     fi
   fi
-  [ -n "$stamp_dir" ] && chmod 0700 "$stamp_dir" 2>/dev/null
-  local stamp="${stamp_dir}/identity-fallback-notice-shown"
+  [ -n "$d" ] && chmod 0700 "$d" 2>/dev/null
+  printf '%s' "$d"
+  return 0
+}
+
+# _axonflow_identity_notice_throttled <stamp-file-name> <message> [key] —
+# shared once-per-UTC-day stderr emitter (house pattern: upgrade-prompt.sh).
+# Each notice concern gets its OWN stamp file — co-locating two concerns on
+# one stamp silently swallows whichever fires second (the pre-1.5.2
+# upgrade-prompt regression). The optional KEY is stamped alongside the date:
+# the notice re-fires immediately when the key CHANGES, even same-day — the
+# git-source notice keys on the resolved email so a mid-day identity switch
+# (e.g. an archive-shipped .git/config swapping the asserted address) is
+# never swallowed by an earlier notice for a different identity. Only when NO
+# stamp location is writable does a notice print every time (visibility beats
+# silence at that point). The pre-tool and post-tool hooks racing on the very
+# first fire can double-print once — benign, the stamp settles it from then
+# on. Suppress all identity notices with AXONFLOW_IDENTITY_NOTICE=off.
+_axonflow_identity_notice_throttled() {
+  case "${AXONFLOW_IDENTITY_NOTICE:-}" in
+    off|0|false|no) return 0 ;;
+  esac
+  local stamp_dir=""
+  stamp_dir="$(_axonflow_identity_stamp_dir)" || stamp_dir=""
+  local stamp="${stamp_dir}/$1"
   local today=""
   today="$(date -u +%Y-%m-%d 2>/dev/null)" || today=""
+  local want="$today"
+  if [ -n "${3:-}" ]; then
+    want="$today $3"
+  fi
   if [ -n "$stamp_dir" ] && [ -f "$stamp" ]; then
     local last=""
-    last="$(awk 'NR==1 {print $1}' "$stamp" 2>/dev/null)" || last=""
-    [ "$last" = "$today" ] && return 0
+    last="$(head -n1 "$stamp" 2>/dev/null)" || last=""
+    [ "$last" = "$want" ] && return 0
   fi
   if [ -n "$stamp_dir" ]; then
-    printf '%s\n' "$today" >"$stamp" 2>/dev/null || true
+    printf '%s\n' "$want" >"$stamp" 2>/dev/null || true
+    # Defense in depth: the git-notice stamp carries the asserted email.
+    chmod 0600 "$stamp" 2>/dev/null
   fi
-  echo "[AxonFlow] No developer identity resolved (${1:-no identity source available}) — governed activity will be attributed to the client-scoped id, not a person, in the portal's User column. Fix: export AXONFLOW_USER_EMAIL=you@company.com (fleets: set it per developer via managed settings / MDM; silence this notice: AXONFLOW_IDENTITY_NOTICE=off). Docs: https://docs.getaxonflow.com/docs/enterprise/per-developer-identity" >&2
+  echo "$2" >&2
   return 0
+}
+
+# _axonflow_identity_fallback_notice <reason> — one-line stderr diagnostic
+# emitted when no identity resolves, so a developer or fleet admin can see WHY
+# audit rows are about to attribute to the client-scoped id instead of a
+# person (the silent version of this is exactly how a mis-provisioned fleet
+# goes unnoticed — axonflow-enterprise#2832).
+_axonflow_identity_fallback_notice() {
+  _axonflow_identity_notice_throttled "identity-fallback-notice-shown" \
+    "[AxonFlow] No developer identity resolved (${1:-no identity source available}) — governed activity will be attributed to the client-scoped id, not a person, in the portal's User column. Fix: export AXONFLOW_USER_EMAIL=you@company.com (fleets: set it per developer via managed settings / MDM; silence this notice: AXONFLOW_IDENTITY_NOTICE=off). Docs: https://docs.getaxonflow.com/docs/enterprise/per-developer-identity"
+}
+
+# _axonflow_identity_git_notice <email> — one-line stderr diagnostic emitted
+# when attribution comes from the GIT fallback (#2842). The git identity is
+# unverified and a repository's local config can influence it (a repo shipped
+# as an archive can carry a .git/config with an attacker-chosen user.email;
+# note `git clone` does NOT copy config, so a normal clone cannot), so
+# git-sourced attribution must never be SILENT — the developer sees exactly
+# which identity is being asserted on their audit rows and where the
+# trustworthy source is. Separate stamp from the fallback notice: they are
+# independent operator concerns. Keyed on the resolved email so a SAME-DAY
+# identity switch re-fires immediately (an earlier notice for the developer's
+# own address must not swallow a later attacker-influenced one).
+_axonflow_identity_git_notice() {
+  _axonflow_identity_notice_throttled "identity-git-source-notice-shown" \
+    "[AxonFlow] Developer identity resolved from git config user.email ($1) — an UNVERIFIED source that a repository's local configuration can influence; audit rows will attribute to it. For trustworthy attribution set AXONFLOW_USER_EMAIL (fleets: managed settings / MDM; silence this notice: AXONFLOW_IDENTITY_NOTICE=off). Docs: https://docs.getaxonflow.com/docs/enterprise/per-developer-identity" \
+    "$1"
 }
 
 # resolve_user_identity — side-effect only. Leaves AXONFLOW_USER_EMAIL_RESOLVED
@@ -197,6 +256,12 @@ resolve_user_identity() {
 
   if [ -z "$email" ]; then
     _axonflow_identity_fallback_notice "$reason"
+  elif [ "$source" = "git" ]; then
+    # #2842: git-sourced attribution is never silent — the merged read is
+    # KEPT (repo-local wins, matching git's own identity semantics and the
+    # legitimate per-repo-identity workflow; a normal clone cannot inject a
+    # config), and the notice removes the property that made it dangerous.
+    _axonflow_identity_git_notice "$email"
   fi
   return 0
 }

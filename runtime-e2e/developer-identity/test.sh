@@ -85,15 +85,28 @@ echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\
 echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
   | "$POST_HOOK" >/dev/null 2>&1
 
-# Give the async audit writers time to flush.
-sleep 4
-
 query() { psql "$DB_URL" -tAc "$1" 2>/dev/null; }
+
+# wait_count <count-sql> <min> — poll (1s interval, up to 20s) until the
+# scalar count query returns >= min, then echo the final count. The audit
+# writers are async (enqueue + background flush), so a fixed sleep flakes on
+# a freshly-booted orchestrator whose first flush cycle lands late.
+wait_count() {
+  local sql="$1" min="$2" n=0 c=0
+  while [ "$n" -lt 20 ]; do
+    c=$(query "$sql")
+    c="${c:-0}"
+    [ "$c" -ge "$min" ] && break
+    n=$((n + 1))
+    sleep 1
+  done
+  printf '%s' "$c"
+}
 
 errors=0
 
 # The check_policy (PreToolUse) row: user_email + session_id both populated.
-CHK=$(query "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$EMAIL' AND session_id='$SID';")
+CHK=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$EMAIL' AND session_id='$SID';" 1)
 if [ "${CHK:-0}" -ge 1 ]; then
   echo "PASS: check_policy row carries user_email + session_id"
 else
@@ -102,7 +115,7 @@ else
 fi
 
 # The audit_tool_call (PostToolUse) row: user_email + session_id both populated.
-AUD=$(query "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND user_email='$EMAIL' AND session_id='$SID';")
+AUD=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND user_email='$EMAIL' AND session_id='$SID';" 1)
 if [ "${AUD:-0}" -ge 1 ]; then
   echo "PASS: audit_tool_call row carries user_email + session_id"
 else
@@ -135,7 +148,11 @@ echo "{\"session_id\":\"$SID_ABSENT\",\"tool_name\":\"Bash\",\"tool_input\":{\"c
   | ( cd "$ABSENT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$ABSENT_HOME" \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
       "$POST_HOOK" >/dev/null 2>>"$HOOK_ERR" )
-sleep 4
+
+# Wait for BOTH planes to flush before asserting the degradation contract
+# (the blank/leak checks below inspect every row of this session).
+wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID_ABSENT' AND request_type='mcp_check_policy';" 1 >/dev/null
+wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID_ABSENT' AND request_type='tool_call_audit';" 1 >/dev/null
 
 # Governed traffic still flowed (identity-absent must never drop governance).
 ROWS=$(query "SELECT count(*) FROM audit_logs WHERE session_id='$SID_ABSENT';")
@@ -169,38 +186,78 @@ fi
 # ---------------------------------------------------------------------------
 # #2836 leg 3: git-fallback — no AXONFLOW_USER_EMAIL, but a git user.email is
 # configured. The hardened resolution (merged → --global read) must carry the
-# git identity through the REAL hooks into the canonical audit rows.
+# git identity through the REAL hooks into the canonical audit rows, and
+# (#2842) git-sourced attribution must be NON-SILENT: the hook fires the
+# unverified-git-source stderr notice naming the asserted identity.
 # ---------------------------------------------------------------------------
 SID_GIT="e2e-session-git-$(date +%s)-$RANDOM"
 GIT_EMAIL="e2e-git-$(date +%s)-$RANDOM@example.com"
 GIT_HOME="$(mktemp -d)"
+GIT_ERR="$(mktemp)"
 GCFG="$GIT_HOME/gitconfig"
 printf '[user]\n\temail = %s\n' "$GIT_EMAIL" > "$GCFG"
-trap 'rm -rf "$ABSENT_HOME" "$HOOK_ERR" "$GIT_HOME"' EXIT
+trap 'rm -rf "$ABSENT_HOME" "$HOOK_ERR" "$GIT_HOME" "$GIT_ERR"' EXIT
 echo "--- Driving governed hooks with git-only identity ($GIT_EMAIL, session=$SID_GIT) ---"
 
 echo "{\"session_id\":\"$SID_GIT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
   | ( cd "$GIT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$GIT_HOME" \
       GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-      "$PRE_HOOK" >/dev/null 2>&1 )
+      "$PRE_HOOK" >/dev/null 2>>"$GIT_ERR" )
 echo "{\"session_id\":\"$SID_GIT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
   | ( cd "$GIT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$GIT_HOME" \
       GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-      "$POST_HOOK" >/dev/null 2>&1 )
-sleep 4
+      "$POST_HOOK" >/dev/null 2>>"$GIT_ERR" )
 
-GIT_CHK=$(query "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$GIT_EMAIL' AND session_id='$SID_GIT';")
+GIT_CHK=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$GIT_EMAIL' AND session_id='$SID_GIT';" 1)
 if [ "${GIT_CHK:-0}" -ge 1 ]; then
   echo "PASS: git-fallback — check_policy row carries the git user.email"
 else
   echo "FAIL: git-fallback — no mcp_check_policy row with user_email=$GIT_EMAIL AND session_id=$SID_GIT"
   errors=$((errors + 1))
 fi
-GIT_AUD=$(query "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND user_email='$GIT_EMAIL' AND session_id='$SID_GIT';")
+GIT_AUD=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND user_email='$GIT_EMAIL' AND session_id='$SID_GIT';" 1)
 if [ "${GIT_AUD:-0}" -ge 1 ]; then
   echo "PASS: git-fallback — audit_tool_call row carries the git user.email"
 else
   echo "FAIL: git-fallback — no tool_call_audit row with user_email=$GIT_EMAIL AND session_id=$SID_GIT"
+  errors=$((errors + 1))
+fi
+if grep -q "resolved from git config" "$GIT_ERR" && grep -q "$GIT_EMAIL" "$GIT_ERR"; then
+  echo "PASS: git-fallback — unverified-git-source notice fired naming the identity (#2842)"
+else
+  echo "FAIL: git-fallback — git-source notice missing from hook stderr: $(cat "$GIT_ERR")"
+  errors=$((errors + 1))
+fi
+
+# ---------------------------------------------------------------------------
+# #2842 leg 4: control bytes in the git user.email — FF/VT/DEL survive git
+# reads, and un-sanitized they broke the MCP headers JSON and forwarded raw
+# bytes into audit_logs. Outcome contract: the canonical rows carry the
+# CLEANED address; the raw-byte variant appears NOWHERE for this session.
+# ---------------------------------------------------------------------------
+SID_CTRL="e2e-session-ctrl-$(date +%s)-$RANDOM"
+CTRL_BASE="e2e-ctrl-$(date +%s)-$RANDOM"
+CTRL_HOME="$(mktemp -d)"
+CTRL_CFG="$CTRL_HOME/gitconfig"
+# Raw FF (0x0c) between F and Z, raw DEL (0x7f) before the @ — the sanitized
+# value the platform must store is "${CTRL_BASE}FZ@example.com".
+printf '[user]\n\temail = %s' "$CTRL_BASE" > "$CTRL_CFG"
+printf 'F\x0cZ\x7f@example.com\n' >> "$CTRL_CFG"
+trap 'rm -rf "$ABSENT_HOME" "$HOOK_ERR" "$GIT_HOME" "$GIT_ERR" "$CTRL_HOME"' EXIT
+echo "--- Driving governed hooks with control-byte git identity (session=$SID_CTRL) ---"
+
+echo "{\"session_id\":\"$SID_CTRL\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
+  | ( cd "$CTRL_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$CTRL_HOME" \
+      GIT_CONFIG_GLOBAL="$CTRL_CFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+      "$PRE_HOOK" >/dev/null 2>&1 )
+
+CTRL_ROWS=$(wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID_CTRL' AND user_email='${CTRL_BASE}FZ@example.com';" 1)
+CTRL_RAW=$(query "SELECT count(*) FROM audit_logs WHERE session_id='$SID_CTRL' AND (user_email LIKE '%'||chr(12)||'%' OR user_email LIKE '%'||chr(127)||'%');")
+if [ "${CTRL_ROWS:-0}" -ge 1 ] && [ "${CTRL_RAW:-1}" -eq 0 ]; then
+  echo "PASS: control-byte git email → audit row carries the CLEANED address, no raw byte stored"
+else
+  echo "FAIL: control-byte outcome wrong (clean=$CTRL_ROWS raw=$CTRL_RAW):"
+  query "SELECT request_type, encode(user_email::bytea,'escape') FROM audit_logs WHERE session_id='$SID_CTRL';" || true
   errors=$((errors + 1))
 fi
 
@@ -211,4 +268,4 @@ if [ "$errors" -gt 0 ]; then
 fi
 
 echo ""
-echo "PASS: developer identity end-to-end — env identity, identity-absent degradation + diagnostic, and git fallback all verified on the real stack"
+echo "PASS: developer identity end-to-end — env identity, identity-absent degradation + diagnostic, git fallback (non-silent), and control-byte sanitization all verified on the real stack"

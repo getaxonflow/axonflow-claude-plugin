@@ -14,7 +14,13 @@ axonflow-enterprise#2836), by driving the plugin's real hook scripts
    the client-scoped id (never blank/NULL, no leaked identity), and the hook
    fires the one-line stderr diagnostic explaining why.
 3. **git fallback:** with only a git `user.email` configured, the hardened
-   resolution carries the git identity through both planes.
+   resolution carries the git identity through both planes — and the hook
+   fires the unverified-git-source notice naming the asserted identity
+   (axonflow-enterprise#2842: git-sourced attribution is never silent).
+4. **control-byte sanitization (#2842):** a git `user.email` carrying raw
+   FF/DEL bytes (FF breaks the printf-assembled MCP headers JSON; DEL is an
+   RFC 7230-illegal header byte) lands in `audit_logs` as the CLEANED
+   address; the raw bytes are stored nowhere for the session.
 
 **Prereqs:** `jq`, `curl`, `psql` on PATH; a live agent at `$AXONFLOW_ENDPOINT`
 (default `http://localhost:8080`); an enterprise Basic credential
