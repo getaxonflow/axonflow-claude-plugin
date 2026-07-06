@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [1.9.0] - 2026-07-06 — identity hardening: control-byte sanitizer + non-silent git-sourced attribution notice
 
 ### Security
 
