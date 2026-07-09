@@ -21,7 +21,7 @@ cd "$ROOT"
 ERRORS=0
 
 # Canonical version = the latest released CHANGELOG entry (first `## [x.y.z]`).
-LATEST_VERSION=$(grep -m1 -E '^## \[[0-9]' CHANGELOG.md | sed -E 's/^## \[([0-9][0-9.]*)\].*/\1/')
+LATEST_VERSION=$(grep -m1 -E '^## \[[0-9]' CHANGELOG.md | sed -E 's/^## \[([^]]+)\].*/\1/')
 if [ -z "$LATEST_VERSION" ]; then
   echo "❌ Could not extract version from CHANGELOG.md (expected a '## [x.y.z]' heading)"
   exit 1
@@ -44,6 +44,12 @@ check ".claude-plugin/marketplace.json (.metadata.version)" \
   "$(jq -r '.metadata.version // empty' .claude-plugin/marketplace.json)"
 check ".claude-plugin/marketplace.json (.plugins[0].version)" \
   "$(jq -r '.plugins[0].version // empty' .claude-plugin/marketplace.json)"
+# .mcp.json carries the MCP-plane version as a hardcoded literal inside the
+# headersHelper inline (X-Axonflow-Client: claude-code-plugin/<version>). It can
+# resolve the plugin dir at runtime, so the version is baked in and MUST be
+# kept in lockstep here — the whole point of v1.9.1 was a version that drifted.
+check ".mcp.json (X-Axonflow-Client header) [ON-THE-WIRE MCP plane]" \
+  "$(grep -oE 'claude-code-plugin/[^\"]+' .mcp.json | head -1 | sed 's#.*/##')"
 
 echo ""
 if [ "$ERRORS" -ne 0 ]; then

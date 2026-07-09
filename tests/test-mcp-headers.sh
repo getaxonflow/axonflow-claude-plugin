@@ -80,8 +80,8 @@ rm -rf "$TMPHOME"
 #    helper must never emit a partial / unparseable value (which Claude Code
 #    rejects as "did not return a valid value").
 OUT="$(env -u AXONFLOW_AUTH HOME=/nonexistent-empty-home /bin/sh -c "cd / && $HH")"
-if printf '%s' "$OUT" | jq -e 'has("X-Axonflow-Client") and (has("Authorization")|not)' >/dev/null 2>&1; then
-  echo "PASS: no credential → valid JSON with only X-Axonflow-Client"
+if printf '%s' "$OUT" | jq -e 'has("X-Axonflow-Client") and (."X-Axonflow-Client" | test("^claude-code-plugin/[0-9]")) and (has("Authorization")|not)' >/dev/null 2>&1; then
+  echo "PASS: no credential → valid JSON with only a VERSIONED X-Axonflow-Client"
 else
   echo "FAIL: no-credential output is not the expected valid JSON: $OUT"; fail=1
 fi
