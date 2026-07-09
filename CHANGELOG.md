@@ -5,10 +5,11 @@
 ### Fixed
 
 - **The plugin now reports its actual version in the `X-Axonflow-Client` header.** `.claude-plugin/plugin.json` — the file `scripts/client-header.sh` reads to build `claude-code-plugin/<version>` — was left at `1.7.0` while the v1.8.0 and v1.9.0 releases bumped only `marketplace.json` and the changelog. As a result every 1.7.0 / 1.8.0 / 1.9.0 install reported itself as `1.7.0`, collapsing three releases into a single telemetry bucket and comparing against the platform floor in `version-check.sh` as if it were 1.7.0. plugin.json is now bumped in lockstep with the release.
+- **The MCP `tools/call` plane now reports the version too.** The inline `X-Axonflow-Client` header in `.mcp.json` hardcoded `claude-code-plugin` with no version, so every governed MCP tool call was version-less on the wire — the same telemetry blind spot as the hook plane, just on a different plane. It now emits `claude-code-plugin/<version>`.
 
 ### Added
 
-- **Version-alignment CI gate** (`scripts/validate-version-alignment.sh` + `.github/workflows/version-alignment.yml`): the build fails unless `plugin.json`, both `marketplace.json` version fields, and the top `CHANGELOG.md` entry all match. This makes the on-the-wire version incapable of drifting from the released version again — the same discipline the platform and SDK manifests already enforce.
+- **Version-alignment CI gate** (`scripts/validate-version-alignment.sh` + `.github/workflows/version-alignment.yml`): the build fails unless `plugin.json`, both `marketplace.json` version fields, the `.mcp.json` MCP-plane client header, and the top `CHANGELOG.md` entry all match. This makes the on-the-wire version (on both the hook and MCP planes) incapable of drifting from the released version again — the same discipline the platform and SDK manifests already enforce.
 
 ## [1.9.0] - 2026-07-06 — identity hardening: control-byte sanitizer + non-silent git-sourced attribution notice
 
