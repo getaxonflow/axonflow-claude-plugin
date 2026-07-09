@@ -1,0 +1,29 @@
+name: Version Alignment
+
+# Fails unless the ON-THE-WIRE plugin version (.claude-plugin/plugin.json, read
+# into the X-Axonflow-Client header by client-header.sh) matches both
+# marketplace.json version fields and the top CHANGELOG entry. Prevents the
+# v1.9.1-class bug where plugin.json drifted to 1.7.0 while releases bumped only
+# marketplace.json — collapsing 1.7 / 1.8 / 1.9 into one telemetry bucket and
+# mis-gating version-check.sh. Runs on every PR (cheap) so it can be a required
+# check without the paths-filter "skipped required check" footgun.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  version-alignment:
+    name: Plugin version alignment
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Ensure jq
+        run: command -v jq >/dev/null || (sudo apt-get update && sudo apt-get install -y jq)
+      - name: Validate version alignment
+        run: ./scripts/validate-version-alignment.sh

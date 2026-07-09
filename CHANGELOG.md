@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.9.1] - 2026-07-09 — fix: report the real plugin version on the wire (plugin.json was stuck at 1.7.0)
+
+### Fixed
+
+- **The plugin now reports its actual version in the `X-Axonflow-Client` header.** `.claude-plugin/plugin.json` — the file `scripts/client-header.sh` reads to build `claude-code-plugin/<version>` — was left at `1.7.0` while the v1.8.0 and v1.9.0 releases bumped only `marketplace.json` and the changelog. As a result every 1.7.0 / 1.8.0 / 1.9.0 install reported itself as `1.7.0`, collapsing three releases into a single telemetry bucket and comparing against the platform floor in `version-check.sh` as if it were 1.7.0. plugin.json is now bumped in lockstep with the release.
+
+### Added
+
+- **Version-alignment CI gate** (`scripts/validate-version-alignment.sh` + `.github/workflows/version-alignment.yml`): the build fails unless `plugin.json`, both `marketplace.json` version fields, and the top `CHANGELOG.md` entry all match. This makes the on-the-wire version incapable of drifting from the released version again — the same discipline the platform and SDK manifests already enforce.
+
 ## [1.9.0] - 2026-07-06 — identity hardening: control-byte sanitizer + non-silent git-sourced attribution notice
 
 ### Security
