@@ -123,6 +123,23 @@ if [ -n "${AXONFLOW_USER_EMAIL_RESOLVED:-}" ]; then
   AUTH_HEADER+=(-H "X-User-Email: ${AXONFLOW_USER_EMAIL_RESOLVED}")
 fi
 
+# Per-user authorization token (axonflow-enterprise#2935, epic #2919).
+# Resolve the admin-minted per-user token from env (AXONFLOW_USER_TOKEN —
+# wins) or ~/.config/axonflow/user-token.json (0600-guarded) and, when
+# present, ship it as X-User-Token so the platform resolves a VALIDATED
+# {identity, role} for this developer instead of the least-privilege
+# attribution-only fallback. Appended to AUTH_HEADER so it ships on every
+# governed curl below (check_policy + the blocked/redacted audit_tool_call
+# POSTs). Omitted entirely when unconfigured (no empty header) — requests
+# are then byte-identical to a pre-token plugin and X-User-Email keeps its
+# existing attribution role. The token value is never logged.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/user-token.sh"
+resolve_user_token
+if [ -n "${AXONFLOW_USER_TOKEN:-}" ]; then
+  AUTH_HEADER+=(-H "X-User-Token: ${AXONFLOW_USER_TOKEN}")
+fi
+
 # One-time positive disclosure when first connecting to Community SaaS. Stamp
 # is separate from telemetry so the disclosure fires exactly once per install,
 # independent of the 7-day heartbeat cadence.
@@ -331,14 +348,23 @@ if [ -n "$JSONRPC_ERROR" ]; then
         echo "[AxonFlow] WARNING: auth error from ${ENDPOINT} (${JSONRPC_ERROR}); AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR is set, so this tool call is ALLOWED WITHOUT GOVERNANCE. Set AXONFLOW_AUTH=base64(org_id:license_key) and unset this break-glass to restore enforcement." >&2
         exit 0
       fi
+      # #2935: when a per-user token was sent, name it as a likely cause —
+      # the platform fails closed on a presented-but-invalid X-User-Token
+      # (expired, revoked, wrong org), and the generic "fix AXONFLOW_AUTH"
+      # guidance would send the operator down the wrong path.
+      USER_TOKEN_HINT=""
+      if [ -n "${AXONFLOW_USER_TOKEN:-}" ]; then
+        USER_TOKEN_HINT=" A per-user token is configured (AXONFLOW_USER_TOKEN / user-token.json) and was sent as X-User-Token — if it is expired, revoked, or minted for a different org, the platform rejects the request; ask your admin to rotate it, or remove it to fall back to shared-credential attribution."
+      fi
       jq -n \
         --arg err "$JSONRPC_ERROR" \
         --arg endpoint "$ENDPOINT" \
+        --arg ut_hint "$USER_TOKEN_HINT" \
         '{
           hookSpecificOutput: {
             hookEventName: "PreToolUse",
             permissionDecision: "deny",
-            permissionDecisionReason: ("AxonFlow governance is fail-closed: the agent at " + $endpoint + " rejected the policy check with an authentication error (\"" + $err + "\", code -32001), so this tool call is blocked. This is a self-hosted / Enterprise (in-VPC) agent that requires credentials. Fix: set AXONFLOW_ENDPOINT to your agent URL and AXONFLOW_AUTH to base64(org_id:license_key) — e.g. export AXONFLOW_AUTH=$(printf %s \"<org_id>:<license_key>\" | base64) — then restart Claude Code. Docs: https://docs.getaxonflow.com/docs/integration/claude-code#self-hosted--enterprise-authentication . Break-glass to keep working ungoverned while you fix it: export AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1 (not recommended).")
+            permissionDecisionReason: ("AxonFlow governance is fail-closed: the agent at " + $endpoint + " rejected the policy check with an authentication error (\"" + $err + "\", code -32001), so this tool call is blocked. This is a self-hosted / Enterprise (in-VPC) agent that requires credentials. Fix: set AXONFLOW_ENDPOINT to your agent URL and AXONFLOW_AUTH to base64(org_id:license_key) — e.g. export AXONFLOW_AUTH=$(printf %s \"<org_id>:<license_key>\" | base64) — then restart Claude Code." + $ut_hint + " Docs: https://docs.getaxonflow.com/docs/integration/claude-code#self-hosted--enterprise-authentication . Break-glass to keep working ungoverned while you fix it: export AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1 (not recommended).")
           }
         }'
       exit 0

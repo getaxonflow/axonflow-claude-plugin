@@ -281,6 +281,78 @@ else
 fi
 rm -rf "$NUL_REPO"
 
+# ---------------------------------------------------------------------------
+# Per-user authorization token (axonflow-enterprise#2935, epic #2919): the
+# inline must emit X-User-Token when a token is configured (env
+# AXONFLOW_USER_TOKEN wins → 0600-guarded ~/.config/axonflow/user-token.json),
+# omit it entirely when not (byte-identical output — never an empty header),
+# and DROP a wire-unsafe candidate rather than mangle-and-send it (the
+# platform fails closed on a presented-but-invalid token). The bash reference
+# impl (scripts/user-token.sh + mcp-auth-headers.sh) is pinned by
+# tests/test-user-token.sh; these pin the inline port.
+# ---------------------------------------------------------------------------
+UT_GOOD='eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6ImRldkB4LmNvIn0.sig-_123'
+
+# 20) env AXONFLOW_USER_TOKEN → X-User-Token in the emitted object.
+OUT="$(HOME=/nonexistent-empty-home AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_EMAIL='alice@example.com' AXONFLOW_USER_TOKEN="$UT_GOOD" run_hh)"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Token" // empty')" = "$UT_GOOD" ]; then
+  echo "PASS: AXONFLOW_USER_TOKEN → X-User-Token header"
+else
+  echo "FAIL: X-User-Token not emitted from AXONFLOW_USER_TOKEN: $OUT"; fail=1
+fi
+
+# 21) unconfigured (the common fleet state) → output is BYTE-IDENTICAL to the
+#     configured run minus the X-User-Token member — proves strictly-additive
+#     (no empty header, no reordering, no other drift).
+BASE="$(HOME=/nonexistent-empty-home AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_EMAIL='alice@example.com' run_hh)"
+CONFIGURED_MINUS_TOKEN="$(HOME=/nonexistent-empty-home AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_EMAIL='alice@example.com' AXONFLOW_USER_TOKEN="$UT_GOOD" run_hh | sed "s/,\"X-User-Token\":\"$UT_GOOD\"//")"
+if printf '%s' "$BASE" | jq -e 'has("X-User-Token")|not' >/dev/null 2>&1 \
+   && [ "$BASE" = "$CONFIGURED_MINUS_TOKEN" ]; then
+  echo "PASS: no token → X-User-Token omitted; output byte-identical modulo the token member"
+else
+  echo "FAIL: unconfigured output drifted: base=$BASE configured-minus-token=$CONFIGURED_MINUS_TOKEN"; fail=1
+fi
+
+# 22) file fallback: 0600 user-token.json loads; env wins over it.
+TMPHOME="$(mktemp -d)"
+mkdir -p "$TMPHOME/.config/axonflow"
+printf '{"token":"file.tok.value"}' > "$TMPHOME/.config/axonflow/user-token.json"
+chmod 600 "$TMPHOME/.config/axonflow/user-token.json"
+OUT="$(env -u AXONFLOW_USER_TOKEN HOME="$TMPHOME" AXONFLOW_AUTH='dGVzdA==' /bin/sh -c "cd / && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Token" // empty')" = "file.tok.value" ]; then
+  echo "PASS: 0600 user-token.json → X-User-Token from file"
+else
+  echo "FAIL: 0600 user-token.json not loaded: $OUT"; fail=1
+fi
+OUT="$(HOME="$TMPHOME" AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_TOKEN="$UT_GOOD" /bin/sh -c "cd / && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Token" // empty')" = "$UT_GOOD" ]; then
+  echo "PASS: env AXONFLOW_USER_TOKEN wins over user-token.json"
+else
+  echo "FAIL: file token overrode the env token: $OUT"; fail=1
+fi
+
+# 23) security posture: user-token.json with loose perms (0644) → refused.
+chmod 644 "$TMPHOME/.config/axonflow/user-token.json"
+OUT="$(env -u AXONFLOW_USER_TOKEN HOME="$TMPHOME" AXONFLOW_AUTH='dGVzdA==' /bin/sh -c "cd / && $HH")"
+if printf '%s' "$OUT" | jq -e 'has("X-User-Token")|not' >/dev/null 2>&1; then
+  echo "PASS: user-token.json with unsafe perms (0644) → refused (no X-User-Token)"
+else
+  echo "FAIL: loose-perm user-token.json was used: $OUT"; fail=1
+fi
+rm -rf "$TMPHOME"
+
+# 24) wire-safety: a token candidate carrying a quote / space / CR-LF is
+#     DROPPED (header absent), never mangled-and-sent — and the printf-
+#     assembled headers JSON stays valid.
+for BAD in 'to"ken' 'to ken' "$(printf 'tok\r\nEvil: hdr')"; do
+  OUT="$(HOME=/nonexistent-empty-home AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_TOKEN="$BAD" run_hh)"
+  if printf '%s' "$OUT" | jq -e '(has("X-User-Token")|not)' >/dev/null 2>&1; then
+    echo "PASS: wire-unsafe token candidate dropped (valid JSON, no X-User-Token)"
+  else
+    echo "FAIL: wire-unsafe token candidate not dropped: $(printf '%q' "$OUT")"; fail=1
+  fi
+done
+
 echo ""
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: .mcp.json headersHelper unit test"

@@ -66,10 +66,25 @@ resolve_license_token
 . "${SCRIPT_DIR}/user-identity.sh"
 resolve_user_identity
 
+# Per-user authorization token (axonflow-enterprise#2935, epic #2919): resolve
+# the admin-minted token (env AXONFLOW_USER_TOKEN wins, else 0600-guarded
+# ~/.config/axonflow/user-token.json) so MCP-server traffic carries
+# X-User-Token and the platform resolves a validated {identity, role} for the
+# developer. Same env-then-file precedence as the hooks. SYNC NOTE: the
+# .mcp.json inline resolver ports the same resolution (env → 0600 file →
+# wire-safety strip-check) as POSIX sh but OMITS the stderr warnings —
+# headersHelper stderr is not surfaced by Claude Code, so the hooks own the
+# operator-visible diagnostics. tests/test-mcp-headers.sh pins the inline's
+# behavior; tests/test-user-token.sh pins this reference impl's.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/user-token.sh"
+resolve_user_token
+
 AUTH="${AXONFLOW_AUTH:-}"
 LICENSE_TOKEN="${AXONFLOW_LICENSE_TOKEN:-}"
 CLIENT_HEADER="${AXONFLOW_CLIENT_HEADER}"
 USER_EMAIL="${AXONFLOW_USER_EMAIL_RESOLVED:-}"
+USER_TOKEN="${AXONFLOW_USER_TOKEN:-}"
 
 # Cross-deployment safety: drop X-License-Token when the cached token
 # is a community-saas-issued (aud=community_saas_plugin) but the user
@@ -89,20 +104,30 @@ fi
 # so it is dropped on this legacy path; per-call hooks still ship it).
 if command -v jq &>/dev/null; then
   jq -nc \
-    --arg auth "$AUTH" --arg lt "$LICENSE_TOKEN" --arg ch "$CLIENT_HEADER" --arg ue "$USER_EMAIL" \
+    --arg auth "$AUTH" --arg lt "$LICENSE_TOKEN" --arg ch "$CLIENT_HEADER" --arg ue "$USER_EMAIL" --arg ut "$USER_TOKEN" \
     '{}
      | (if $auth != "" then . + {"Authorization": ("Basic " + $auth)} else . end)
      | (if $lt   != "" then . + {"X-License-Token": $lt} else . end)
      | (if $ue   != "" then . + {"X-User-Email": $ue} else . end)
+     | (if $ut   != "" then . + {"X-User-Token": $ut} else . end)
      | . + {"X-Axonflow-Client": $ch}'
 else
   ue_frag=""
   if [ -n "$USER_EMAIL" ]; then
     ue_frag=", \"X-User-Email\": \"$USER_EMAIL\""
   fi
+  # X-User-Token is safe to hand-quote on the no-jq path: resolve_user_token
+  # only exports values that pass the wire-safety check (no quote/backslash/
+  # whitespace/control bytes), and the env path needs no jq. (X-License-Token
+  # stays dropped here — its resolver requires jq for the file path and its
+  # value is not strip-checked.)
+  ut_frag=""
+  if [ -n "$USER_TOKEN" ]; then
+    ut_frag=", \"X-User-Token\": \"$USER_TOKEN\""
+  fi
   if [ -n "$AUTH" ]; then
-    echo "{\"Authorization\": \"Basic $AUTH\"${ue_frag}, \"X-Axonflow-Client\": \"$CLIENT_HEADER\"}"
+    echo "{\"Authorization\": \"Basic $AUTH\"${ue_frag}${ut_frag}, \"X-Axonflow-Client\": \"$CLIENT_HEADER\"}"
   else
-    echo "{\"X-Axonflow-Client\": \"$CLIENT_HEADER\"${ue_frag}}"
+    echo "{\"X-Axonflow-Client\": \"$CLIENT_HEADER\"${ue_frag}${ut_frag}}"
   fi
 fi
