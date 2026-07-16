@@ -251,7 +251,11 @@ echo "{\"session_id\":\"$SID_CTRL\",\"tool_name\":\"Bash\",\"tool_input\":{\"com
       GIT_CONFIG_GLOBAL="$CTRL_CFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
       "$PRE_HOOK" >/dev/null 2>&1 )
 
-CTRL_ROWS=$(wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID_CTRL' AND user_email='${CTRL_BASE}FZ@example.com';" 1)
+# The platform canonicalizes the attribution email (lowercase+trim) since
+# enterprise#2929 — audit rows carry LOWER(cleaned address). Assert
+# case-insensitively so the leg holds on both pre- and post-#2929 platforms;
+# the substance under test is byte-cleaning, not casing.
+CTRL_ROWS=$(wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID_CTRL' AND LOWER(user_email)=LOWER('${CTRL_BASE}FZ@example.com');" 1)
 CTRL_RAW=$(query "SELECT count(*) FROM audit_logs WHERE session_id='$SID_CTRL' AND (user_email LIKE '%'||chr(12)||'%' OR user_email LIKE '%'||chr(127)||'%');")
 if [ "${CTRL_ROWS:-0}" -ge 1 ] && [ "${CTRL_RAW:-1}" -eq 0 ]; then
   echo "PASS: control-byte git email → audit row carries the CLEANED address, no raw byte stored"

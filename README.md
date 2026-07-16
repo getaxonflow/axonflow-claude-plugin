@@ -298,6 +298,11 @@ export AXONFLOW_TIMEOUT_SECONDS=12
 # customer portal's User column and audit filter show a real person instead
 # of a synthetic id. See "Per-developer identity" below.
 export AXONFLOW_USER_EMAIL=alice@your-company.com
+
+# Optional (Enterprise): admin-minted per-user token for a VERIFIED
+# {identity, role} — role-scoped access instead of asserted-label-only
+# attribution. See "Per-user authorization token" below.
+export AXONFLOW_USER_TOKEN=<token minted by your org admin>
 ```
 
 When `AXONFLOW_AUTH` is unset and `AXONFLOW_ENDPOINT` is unset, the plugin defaults to AxonFlow Community SaaS — no further configuration needed.
@@ -353,7 +358,50 @@ The resolved source is exported as `AXONFLOW_USER_IDENTITY_SOURCE`
 (`env` | `git` | `none`) for scripting/debugging.
 
 Identity here is *asserted*, not cryptographically verified — it improves audit
-visibility; it is not an authentication boundary.
+visibility; it is not an authentication boundary. For a **verified** per-user
+identity with role-based access, see the per-user authorization token below.
+
+### Per-user authorization token (`AXONFLOW_USER_TOKEN`)
+
+`AXONFLOW_USER_EMAIL` is an asserted label; the **per-user token** is the
+verified counterpart. On an Enterprise platform that validates per-user tokens
+(enterprise#2929, first platform release after v9.9.0), an org admin mints a
+token per developer (`POST /api/v1/admin/organizations/{org_id}/user-tokens`,
+or OIDC tokens from your IdP), and the plugin sends it as the `X-User-Token`
+header on every governed request — the MCP connection and both hooks. The
+platform validates it (signature, expiry, revocation, org binding) and
+resolves a **non-forgeable `{identity, role}`** for the developer: audit rows
+attribute to the verified identity, and role-scoped features (e.g. who can
+read the whole tenant's audit trail vs. only their own rows) key on the
+validated role instead of treating every fleet developer identically.
+
+Resolution precedence (mirrors the license-token discipline):
+
+1. **`AXONFLOW_USER_TOKEN`** — set per developer via managed settings / MDM
+   (fleet) or the shell profile (individual). Wins outright.
+2. **`~/.config/axonflow/user-token.json`** — `{"token": "<minted token>"}`,
+   written by your fleet's provisioning tooling. The file **must be `0600`**
+   (owner read/write only); the plugin refuses a group/world-readable token
+   file with a stderr warning rather than loading it silently:
+
+   ```bash
+   umask 077
+   printf '{"token":"%s"}' "<minted token>" > ~/.config/axonflow/user-token.json
+   chmod 600 ~/.config/axonflow/user-token.json
+   ```
+
+3. **Unset** — no `X-User-Token` header is sent (never an empty header) and
+   requests are exactly what a pre-1.10 plugin sends; the platform keeps its
+   least-privilege attribution path (`X-User-Email` label, own-rows access).
+
+The token is a **credential**: the plugin never logs or echoes its value, and
+a malformed candidate (whitespace/control/quote bytes — a mis-paste) is
+dropped locally with a diagnostic instead of being sent. Note the platform
+**fails closed** on a presented-but-invalid token (expired, revoked, minted
+for a different org): governed calls are then denied until the token is
+rotated or removed — the deny message names the token as the likely cause.
+Rotation/revocation is admin-driven on the platform; re-provisioning the new
+token to the developer's env/file is all the plugin needs.
 
 ---
 

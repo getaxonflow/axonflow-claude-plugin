@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.10.0] - 2026-07-16 — per-user authorization token (X-User-Token) on every governed request
+
+### Added
+
+- **The plugin now sends the admin-minted per-user token as `X-User-Token` on every governed request** (axonflow-enterprise#2935, epic #2919). The platform's fleet plane authenticates the *tenant* with the shared Basic credential; the per-user token additionally yields a **validated, non-forgeable `{identity, role}`** for the developer behind the session (`authenticateMCPServerRequest` → `extractPerUserToken` on the platform, shipped in enterprise#2929), which per-user read scoping (enterprise#2922) and audit attribution key on. Covered send surfaces — all four header-assembly paths:
+  - `.mcp.json` inline `headersHelper` (MCP `tools/call` plane),
+  - `scripts/mcp-auth-headers.sh` (the readable reference impl, kept in sync),
+  - `scripts/pre-tool-check.sh` (PreToolUse `check_policy` + the blocked/redacted `audit_tool_call` POSTs),
+  - `scripts/post-tool-audit.sh` (PostToolUse `audit_tool_call` + `check_output`).
+- **Resolution order** (new `scripts/user-token.sh`, mirrors the license-token discipline): `AXONFLOW_USER_TOKEN` env var (managed settings / MDM env block — wins) → `~/.config/axonflow/user-token.json` (`{"token": "<minted token>"}`). The file is **0600-guarded**: non-0600 permissions are rejected with a stderr warning, never loaded silently. Tokens are minted by an org admin via `POST /api/v1/admin/organizations/{org_id}/user-tokens` (enterprise#2930).
+- **Strictly additive and conditional**: when no token is configured, the header is omitted entirely (never empty) and every request is byte-identical to a 1.9.x plugin — the platform keeps its existing least-privilege attribution path. `X-User-Email` attribution is unchanged and still ships alongside the token.
+- **Wire-safety guard, never logged**: a candidate token containing whitespace, control bytes, quotes, or backslashes is dropped locally with a diagnostic that never prints the value — the platform fails closed on a presented-but-invalid token, so sending a mangled credential would turn every governed call into an auth denial. For the same reason, the hooks' `-32001` fail-closed deny message now names a configured per-user token as a likely cause (expired / revoked / wrong org) instead of only pointing at `AXONFLOW_AUTH`.
+- Tests: `tests/test-user-token.sh` (helper unit + reference-impl wire shape), token legs in `tests/test-mcp-headers.sh` (the REAL inline, configured + unconfigured + 0600-rejection), `tests/test-user-token-header-wire.sh` (drives the ACTUAL hooks against a header-capturing agent, asserting present-when-configured / absent-when-not on both planes), and `runtime-e2e/user-token/` (live-stack, no mocks).
+
 ## [1.9.1] - 2026-07-09 — fix: report the real plugin version on the wire (plugin.json was stuck at 1.7.0)
 
 ### Fixed
