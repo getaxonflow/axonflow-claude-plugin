@@ -110,6 +110,26 @@ printf '%s' "$ERR" | grep -qF "line1" \
   && fail "file diagnostic leaked the token value" \
   || pass "file diagnostic does not leak the token value"
 
+# 6b) #108 equivalence matrix (resolver side): a MALFORMED env token is
+#     dropped and the resolver falls back to the file — the file still gets
+#     the full treatment (0600 gate + wire-safety). These are the combos the
+#     .mcp.json inline used to drift on (tests/test-mcp-headers.sh pins the
+#     inline's side of the same matrix).
+#     malformed env + valid 0600 file → the FILE token resolves.
+OUT="$(resolve "$WORK/home1" 'bad token with spaces' 2>/dev/null)"
+[ "$OUT" = "file.tok.value" ] && pass "malformed env token falls back to the 0600 file token" \
+  || fail "malformed env + valid file did not resolve the file token: $OUT"
+#     malformed env + non-0600 file → nothing resolves.
+chmod 644 "$WORK/home1/.config/axonflow/user-token.json"
+OUT="$(resolve "$WORK/home1" 'bad token with spaces' 2>/dev/null)"
+[ -z "$OUT" ] && pass "malformed env + 0644 file → no token (perm gate holds on the fallback)" \
+  || fail "malformed env + 0644 file resolved: $OUT"
+chmod 600 "$WORK/home1/.config/axonflow/user-token.json"
+#     malformed env + malformed-content 0600 file → nothing resolves.
+OUT="$(resolve "$WORK/home2" 'bad token with spaces' 2>/dev/null)"
+[ -z "$OUT" ] && pass "malformed env + malformed file token → both dropped" \
+  || fail "malformed env + malformed file resolved: $OUT"
+
 # 7) A trailing-newline-only artifact never happens via jq -r (it strips it),
 #    but an env var exported with a literal trailing space must be dropped,
 #    not silently "fixed" — a stripped token would fail HS256 verification

@@ -71,11 +71,13 @@ resolve_user_identity
 # ~/.config/axonflow/user-token.json) so MCP-server traffic carries
 # X-User-Token and the platform resolves a validated {identity, role} for the
 # developer. Same env-then-file precedence as the hooks. SYNC NOTE: the
-# .mcp.json inline resolver ports the same resolution (env → 0600 file →
-# wire-safety strip-check) as POSIX sh but OMITS the stderr warnings —
-# headersHelper stderr is not surfaced by Claude Code, so the hooks own the
-# operator-visible diagnostics. tests/test-mcp-headers.sh pins the inline's
-# behavior; tests/test-user-token.sh pins this reference impl's.
+# .mcp.json inline resolver ports the same resolution (strip-check-validate
+# the env candidate first; if missing OR dropped as wire-unsafe, fall back to
+# the 0600 file, whose value is strip-checked too — matching
+# resolve_user_token exactly, #108) as POSIX sh but OMITS the stderr
+# warnings — headersHelper stderr is not surfaced by Claude Code, so the
+# hooks own the operator-visible diagnostics. tests/test-mcp-headers.sh pins
+# the inline's behavior; tests/test-user-token.sh pins this reference impl's.
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/user-token.sh"
 resolve_user_token

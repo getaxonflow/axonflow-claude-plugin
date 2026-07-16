@@ -14,6 +14,10 @@
 - **Wire-safety guard, never logged**: a candidate token containing whitespace, control bytes, quotes, or backslashes is dropped locally with a diagnostic that never prints the value — the platform fails closed on a presented-but-invalid token, so sending a mangled credential would turn every governed call into an auth denial. For the same reason, the hooks' `-32001` fail-closed deny message now names a configured per-user token as a likely cause (expired / revoked / wrong org) instead of only pointing at `AXONFLOW_AUTH`.
 - Tests: `tests/test-user-token.sh` (helper unit + reference-impl wire shape), token legs in `tests/test-mcp-headers.sh` (the REAL inline, configured + unconfigured + 0600-rejection), `tests/test-user-token-header-wire.sh` (drives the ACTUAL hooks against a header-capturing agent, asserting present-when-configured / absent-when-not on both planes), and `runtime-e2e/user-token/` (live-stack, no mocks).
 
+### Fixed
+
+- **Inline `.mcp.json` token resolver aligned with `scripts/user-token.sh` on the malformed-env + valid-file combo** (#108, pre-release corrective to the feature above). The inline `headersHelper` read the 0600 `user-token.json` fallback only when `AXONFLOW_USER_TOKEN` was *empty*, so a malformed (non-empty, wire-unsafe) env token suppressed the file read and was then dropped by the strip-check — no `X-User-Token` on the MCP plane, while the hooks' `resolve_user_token` dropped the same malformed env candidate and sent the valid file token. The inline now validates the env candidate FIRST and falls back to the 0600 file when it is missing OR dropped, strip-checking the file value too — exactly `resolve_user_token`'s semantics. The full env×file combo matrix is pinned on both resolvers (`tests/test-user-token.sh` + `tests/test-mcp-headers.sh`) and a live cross-plane equivalence leg was added to `runtime-e2e/user-token/`.
+
 ## [1.9.1] - 2026-07-09 — fix: report the real plugin version on the wire (plugin.json was stuck at 1.7.0)
 
 ### Fixed
