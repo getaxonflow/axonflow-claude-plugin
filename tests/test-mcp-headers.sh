@@ -353,6 +353,78 @@ for BAD in 'to"ken' 'to ken' "$(printf 'tok\r\nEvil: hdr')"; do
   fi
 done
 
+# ---------------------------------------------------------------------------
+# #108 resolver-equivalence legs: a MALFORMED (non-empty, wire-unsafe) env
+# token must not suppress the file fallback. resolve_user_token (the hook
+# plane) drops the malformed env candidate and falls back to the 0600 file —
+# the inline previously read the file only when the env was EMPTY, so the
+# same misconfig sent the file token on the hook plane but NO X-User-Token
+# on the MCP plane (inconsistent cross-plane scoping). These pin the inline
+# to resolve_user_token's semantics on every env×file combo that used to
+# drift. Red-on-revert with the pre-#108 inline (`if [ -z "$ut" ]` before
+# any strip-check). Resolver-side twins live in tests/test-user-token.sh.
+# ---------------------------------------------------------------------------
+UT_BAD='bad token with spaces'
+
+# 25) THE #108 fix: malformed env + valid 0600 file → X-User-Token carries
+#     the FILE token (same outcome as resolve_user_token on the hook plane).
+TMPHOME="$(mktemp -d)"
+mkdir -p "$TMPHOME/.config/axonflow"
+printf '{"token":"file.tok.value"}' > "$TMPHOME/.config/axonflow/user-token.json"
+chmod 600 "$TMPHOME/.config/axonflow/user-token.json"
+OUT="$(HOME="$TMPHOME" AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_TOKEN="$UT_BAD" /bin/sh -c "cd / && $HH")"
+if printf '%s' "$OUT" | jq -e . >/dev/null 2>&1 \
+   && [ "$(printf '%s' "$OUT" | jq -r '."X-User-Token" // empty')" = "file.tok.value" ]; then
+  echo "PASS: malformed env token + valid 0600 file → X-User-Token from file (matches resolve_user_token)"
+else
+  echo "FAIL: malformed env token suppressed the 0600 file fallback (#108 drift): $OUT"; fail=1
+fi
+
+# 26) malformed env + non-0600 file → BOTH candidates refused → header absent.
+chmod 644 "$TMPHOME/.config/axonflow/user-token.json"
+OUT="$(HOME="$TMPHOME" AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_TOKEN="$UT_BAD" /bin/sh -c "cd / && $HH")"
+if printf '%s' "$OUT" | jq -e '(has("X-User-Token")|not)' >/dev/null 2>&1; then
+  echo "PASS: malformed env token + 0644 file → no X-User-Token (perm gate holds on the fallback)"
+else
+  echo "FAIL: malformed env + 0644 file emitted a token: $OUT"; fail=1
+fi
+
+# 27) malformed env + malformed-content 0600 file → the file value is
+#     strip-checked too (never mangled-and-sent) → header absent.
+jq -n '{token: "line1\nline2"}' > "$TMPHOME/.config/axonflow/user-token.json"
+chmod 600 "$TMPHOME/.config/axonflow/user-token.json"
+OUT="$(HOME="$TMPHOME" AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_TOKEN="$UT_BAD" /bin/sh -c "cd / && $HH")"
+if printf '%s' "$OUT" | jq -e '(has("X-User-Token")|not)' >/dev/null 2>&1; then
+  echo "PASS: malformed env token + malformed file token → both dropped, no X-User-Token"
+else
+  echo "FAIL: malformed env + malformed file emitted a token: $(printf '%q' "$OUT")"; fail=1
+fi
+rm -rf "$TMPHOME"
+
+# 28) malformed env + NO file → dropped outright, header absent, JSON valid
+#     (test 24 covers this shape with other bad candidates; this pins the
+#     multi-space candidate used across the #108 matrix).
+OUT="$(HOME=/nonexistent-empty-home AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_TOKEN="$UT_BAD" run_hh)"
+if printf '%s' "$OUT" | jq -e '(has("X-User-Token")|not)' >/dev/null 2>&1; then
+  echo "PASS: malformed env token + no file → no X-User-Token (valid JSON)"
+else
+  echo "FAIL: malformed env + no file emitted a token: $OUT"; fail=1
+fi
+
+# 29) precedence unchanged by the #108 restructure: a VALID env token still
+#     wins over a valid 0600 file (env validated first, file never read).
+TMPHOME="$(mktemp -d)"
+mkdir -p "$TMPHOME/.config/axonflow"
+printf '{"token":"file.tok.value"}' > "$TMPHOME/.config/axonflow/user-token.json"
+chmod 600 "$TMPHOME/.config/axonflow/user-token.json"
+OUT="$(HOME="$TMPHOME" AXONFLOW_AUTH='dGVzdA==' AXONFLOW_USER_TOKEN="$UT_GOOD" /bin/sh -c "cd / && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Token" // empty')" = "$UT_GOOD" ]; then
+  echo "PASS: valid env token still wins over the 0600 file after the #108 restructure"
+else
+  echo "FAIL: env precedence broken by the #108 restructure: $OUT"; fail=1
+fi
+rm -rf "$TMPHOME"
+
 echo ""
 if [ "$fail" -ne 0 ]; then
   echo "FAIL: .mcp.json headersHelper unit test"

@@ -90,21 +90,40 @@ errors=0
 # ---------------------------------------------------------------------------
 # Leg 0 — UNCONFIGURED (the common fleet state): no token env, no token file
 # (fresh HOME). Attribution must work exactly as pre-1.10: the label path.
+#
+# Trust-gate awareness (platform v9.9.0, enterprise#2897): session_id and the
+# X-User-Email label ride the AXONFLOW_TRUST_IDENTITY_HEADERS gate, which
+# defaults OFF — a gate-off platform still GOVERNS and AUDITS every hook
+# request but attributes rows to the client-scoped identity
+# (`mcp-client:<org>`) with an empty session_id. That is documented, correct
+# platform behavior, so leg 0 detects it and passes on the client-scoped
+# criterion instead of false-failing; the session-keyed per-user attribution
+# assertions (legs 1 and 3a) are then SKIPPED with a notice — they are only
+# provable with the gate on.
 # ---------------------------------------------------------------------------
 EMAIL0="e2e-notoken-$(date +%s)-$RANDOM@example.com"
 SID0="e2e-notoken-sess-$(date +%s)-$RANDOM"
 HOME0="$(mktemp -d)"
+RUN_T0="$(query "SELECT now();")"
 echo "--- Leg 0: unconfigured (label attribution, developer=$EMAIL0) ---"
 echo "{\"session_id\":\"$SID0\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
   | env -u AXONFLOW_USER_TOKEN HOME="$HOME0" AXONFLOW_USER_EMAIL="$EMAIL0" "$PRE_HOOK" >/dev/null 2>&1
 echo "{\"session_id\":\"$SID0\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
   | env -u AXONFLOW_USER_TOKEN HOME="$HOME0" AXONFLOW_USER_EMAIL="$EMAIL0" "$POST_HOOK" >/dev/null 2>&1
+GATE_ON=true
 ROWS0=$(wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID0';" 2)
 if [ "${ROWS0:-0}" -ge 2 ]; then
   echo "PASS: unconfigured plugin — governed rows written on both planes (no behavior change)"
 else
-  echo "FAIL: unconfigured plugin wrote ${ROWS0:-0} rows for session_id=$SID0 (expected >=2)"
-  errors=$((errors + 1))
+  ROWS0CS=$(wait_count "SELECT count(*) FROM audit_logs WHERE user_email LIKE 'mcp-client:%' AND coalesce(session_id,'')='' AND request_type IN ('mcp_check_policy','tool_call_audit') AND timestamp >= '$RUN_T0';" 2)
+  if [ "${ROWS0CS:-0}" -ge 2 ]; then
+    GATE_ON=false
+    echo "PASS: unconfigured plugin — governed rows written on both planes under CLIENT-SCOPED attribution"
+    echo "NOTICE: platform ignores X-Session-Id/X-User-Email (AXONFLOW_TRUST_IDENTITY_HEADERS off, the v9.9.0 default) — session-keyed per-user attribution legs will be skipped."
+  else
+    echo "FAIL: unconfigured plugin wrote ${ROWS0:-0} session-keyed and ${ROWS0CS:-0} client-scoped rows (expected >=2 of either)"
+    errors=$((errors + 1))
+  fi
 fi
 rm -rf "$HOME0"
 
@@ -120,10 +139,10 @@ PROBE_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
   -H "X-User-Token: e2e-garbage-token-probe" \
   -d '{"jsonrpc":"2.0","id":"probe","method":"tools/list"}')
 if [ "$PROBE_CODE" != "401" ]; then
-  echo "SKIP: platform at $ENDPOINT does not validate X-User-Token yet (probe HTTP $PROBE_CODE; needs enterprise#2929+) — legs 1-2 skipped."
+  echo "SKIP: platform at $ENDPOINT does not validate X-User-Token yet (probe HTTP $PROBE_CODE; needs enterprise#2929+) — legs 1-3 skipped."
   echo ""
   if [ "$errors" -ne 0 ]; then echo "FAILED: $errors error(s)"; exit 1; fi
-  echo "user-token runtime E2E: leg 0 passed (legs 1-2 skipped: platform pre-#2929)"
+  echo "user-token runtime E2E: leg 0 passed (legs 1-3 skipped: platform pre-#2929)"
   exit 0
 fi
 echo "--- Platform validates X-User-Token (probe HTTP 401) — running token legs ---"
@@ -184,6 +203,9 @@ TOKEN_EMAIL_CANON=$(printf '%s' "$TOKEN_EMAIL" | tr '[:upper:]' '[:lower:]')
 # 0600-file leg for the post-tool plane — covering both resolution sources
 # against the live stack.
 # ---------------------------------------------------------------------------
+if [ "$GATE_ON" != "true" ]; then
+  echo "SKIP: leg 1 (validated identity beats the forged label) — its audit assertions are session-keyed, which needs AXONFLOW_TRUST_IDENTITY_HEADERS=true on the agent."
+else
 FORGED="forged-label-$(date +%s)@example.com"
 SID1="e2e-token-sess-$(date +%s)-$RANDOM"
 HOME1="$(mktemp -d)"
@@ -221,6 +243,7 @@ fi
 echo "--- audit_logs rows for leg 1 ---"
 query "SELECT request_type, policy_decision, user_email, session_id FROM audit_logs WHERE session_id='$SID1' ORDER BY timestamp;" || true
 rm -rf "$HOME1"
+fi
 
 # ---------------------------------------------------------------------------
 # Leg 2 — UNHAPPY PATH: a tampered token (bit-flipped signature) must fail
@@ -257,6 +280,71 @@ if printf '%s' "$DECISION" | grep -qF "$TAMPERED"; then
 else
   echo "PASS: deny output does not leak the token value"
 fi
+
+# ---------------------------------------------------------------------------
+# Leg 3 — #108 CROSS-PLANE EQUIVALENCE: a MALFORMED (non-empty, wire-unsafe)
+# AXONFLOW_USER_TOKEN env var + a valid 0600 user-token.json. Both resolvers
+# must drop the junk env candidate and fall back to the FILE token:
+#   (a) hook plane — pre-tool-check.sh (resolve_user_token) → the audit row
+#       attributes to the file token's validated email;
+#   (b) MCP plane — the REAL .mcp.json inline headersHelper emits
+#       X-User-Token with the FILE token, and the live platform ACCEPTS those
+#       exact headers (the capability probe above proved junk → 401, so a
+#       200 here means the platform validated the file token).
+# Pre-#108 the inline suppressed the file read on a non-empty env → no
+# X-User-Token on the MCP plane while the hook plane sent the file token.
+# ---------------------------------------------------------------------------
+MALFORMED_ENV='e2e malformed token with spaces'
+SID3="e2e-drift-sess-$(date +%s)-$RANDOM"
+HOME3="$(mktemp -d)"
+mkdir -p "$HOME3/.config/axonflow"
+printf '{"token":"%s"}' "$TOKEN" > "$HOME3/.config/axonflow/user-token.json"
+chmod 600 "$HOME3/.config/axonflow/user-token.json"
+echo "--- Leg 3: malformed env token + valid 0600 file (cross-plane equivalence, #108) ---"
+
+# (a) hook plane: malformed env set → file fallback → validated attribution.
+# Session-keyed like leg 1, so it needs the identity trust gate on.
+if [ "$GATE_ON" != "true" ]; then
+  echo "SKIP: leg 3a (hook-plane session-keyed attribution) — needs AXONFLOW_TRUST_IDENTITY_HEADERS=true on the agent."
+else
+  echo "{\"session_id\":\"$SID3\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"}}" \
+    | env HOME="$HOME3" AXONFLOW_USER_EMAIL="forged3-$(date +%s)@example.com" \
+      AXONFLOW_USER_TOKEN="$MALFORMED_ENV" "$PRE_HOOK" >/dev/null 2>&1
+  CHK3=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$TOKEN_EMAIL_CANON' AND session_id='$SID3';" 1)
+  if [ "${CHK3:-0}" -ge 1 ]; then
+    echo "PASS: hook plane — malformed env dropped, file token attributed ($TOKEN_EMAIL_CANON)"
+  else
+    echo "FAIL: hook plane — no mcp_check_policy row with user_email=$TOKEN_EMAIL_CANON session_id=$SID3"
+    errors=$((errors + 1))
+  fi
+fi
+
+# (b) MCP plane: run the REAL inline headersHelper under the same misconfig
+# and replay its emitted headers against the live MCP server.
+HH="$(jq -r '.mcpServers.axonflow.headersHelper // empty' "$PLUGIN_DIR/.mcp.json")"
+HDRS="$(env HOME="$HOME3" AXONFLOW_AUTH="$AUTH" AXONFLOW_ENDPOINT="$ENDPOINT" \
+  AXONFLOW_USER_TOKEN="$MALFORMED_ENV" /bin/sh -c "cd / && $HH" 2>/dev/null)"
+UT3="$(printf '%s' "$HDRS" | jq -r '."X-User-Token" // empty' 2>/dev/null)"
+AUTH3="$(printf '%s' "$HDRS" | jq -r '.Authorization // empty' 2>/dev/null)"
+if [ "$UT3" = "$TOKEN" ]; then
+  echo "PASS: MCP plane — inline headersHelper fell back to the file token (X-User-Token present)"
+else
+  echo "FAIL: MCP plane — inline headersHelper did not resolve the file token (X-User-Token='${UT3:+<set-but-wrong>}')"
+  errors=$((errors + 1))
+fi
+LEG3_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+  -X POST "$ENDPOINT/api/v1/mcp-server" \
+  -H "Content-Type: application/json" -H "Accept: application/json" \
+  -H "Authorization: $AUTH3" \
+  -H "X-User-Token: $UT3" \
+  -d '{"jsonrpc":"2.0","id":"leg3","method":"tools/list"}')
+if [ "$LEG3_CODE" = "200" ]; then
+  echo "PASS: MCP plane — live platform accepted the inline's emitted headers (HTTP 200; junk probe was 401)"
+else
+  echo "FAIL: MCP plane — live platform rejected the inline's emitted headers (HTTP $LEG3_CODE)"
+  errors=$((errors + 1))
+fi
+rm -rf "$HOME3"
 
 echo ""
 if [ "$errors" -ne 0 ]; then

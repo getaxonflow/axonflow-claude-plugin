@@ -18,12 +18,31 @@ no stubs:
    request (HTTP 401, JSON-RPC `-32001`) and `pre-tool-check.sh` surfaces a
    structured **deny** whose reason names the per-user token as the likely
    cause. Tool calls do NOT silently fall open on a bad credential.
+4. **Cross-plane equivalence (#108):** a MALFORMED (non-empty, wire-unsafe)
+   `AXONFLOW_USER_TOKEN` env var alongside a valid 0600 `user-token.json` —
+   BOTH resolvers drop the junk env candidate and fall back to the file
+   token: the hook plane's audit row attributes to the file token's validated
+   email, AND the **real `.mcp.json` inline `headersHelper`** emits
+   `X-User-Token` with the file token, which the live platform accepts
+   (HTTP 200 on `tools/list`, where the garbage probe got 401). Pre-#108 the
+   inline suppressed the file read whenever the env was non-empty, sending NO
+   token on the MCP plane while the hook plane sent the file token.
 
-Legs 2–3 need a platform that validates `X-User-Token`
+Legs 2–4 need a platform that validates `X-User-Token`
 (`authenticateMCPServerRequest` → `extractPerUserToken`, enterprise#2929). The
 harness probes for that capability by presenting a garbage token: a pre-#2929
-platform ignores the header (probe succeeds → legs 2–3 SKIP with a notice), a
+platform ignores the header (probe succeeds → legs 2–4 SKIP with a notice), a
 post-#2929 enterprise platform rejects it.
+
+**Trust-gate awareness (platform v9.9.0):** `session_id` and the
+`X-User-Email` label ride `AXONFLOW_TRUST_IDENTITY_HEADERS`, which defaults
+OFF. A gate-off platform still governs and audits every request but
+attributes rows to the client-scoped identity (`mcp-client:<org>`, empty
+`session_id`) — documented platform behavior, not a plugin fault. The harness
+detects that after leg 1 and passes leg 1 on the client-scoped criterion; the
+session-keyed per-user attribution assertions (legs 2 and the hook half of
+leg 4) then SKIP with a notice, while the fail-closed leg 3 and the
+MCP-inline half of leg 4 still run.
 
 **Prereqs:** `jq`, `curl`, `psql`, `python3` on PATH; a live agent at
 `$AXONFLOW_ENDPOINT` (default `http://localhost:8080`); an enterprise Basic
