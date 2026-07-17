@@ -13,6 +13,12 @@
 
 set -uo pipefail
 
+# Hermetic: the inline headersHelper resolves its config dir from
+# AXONFLOW_CONFIG_DIR — a host value pointing at a dir with real credentials
+# would leak into every leg below, which only override HOME. Scrub it; leg 30
+# (the config-dir pin) sets it explicitly per-invocation.
+unset AXONFLOW_CONFIG_DIR
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MCP_JSON="$ROOT/.mcp.json"
 fail=0

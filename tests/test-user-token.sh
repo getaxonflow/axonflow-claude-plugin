@@ -163,6 +163,12 @@ OUT="$(resolve "$WORK/no-home" "${GOOD_TOKEN} " 2>/dev/null)"
 echo ""
 echo "== mcp-auth-headers.sh reference impl =="
 
+# Hermetic: the resolver honors AXONFLOW_CONFIG_DIR (see leg 6c), so a host
+# value pointing at a real token dir would leak into the reference-impl legs
+# below, which only override HOME. Scrub it here; legs that exercise the
+# override set it explicitly per-invocation.
+unset AXONFLOW_CONFIG_DIR
+
 # 8) Configured → X-User-Token present in the emitted JSON.
 OUT="$(HOME="$WORK/no-home" AXONFLOW_AUTH='dGVzdA==' AXONFLOW_ENDPOINT='http://selfhosted.local' \
   AXONFLOW_USER_TOKEN="$GOOD_TOKEN" AXONFLOW_USER_EMAIL='dev@example.com' \
