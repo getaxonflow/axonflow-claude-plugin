@@ -25,7 +25,8 @@
 #
 #   1. AXONFLOW_USER_TOKEN env var (managed settings / MDM env block, same
 #      mechanism as AXONFLOW_USER_EMAIL per #2762) — wins outright.
-#   2. ~/.config/axonflow/user-token.json — {"token": "<minted token>"},
+#   2. ${AXONFLOW_CONFIG_DIR:-~/.config/axonflow}/user-token.json —
+#      {"token": "<minted token>"},
 #      written by the fleet's provisioning tooling.
 #
 # Mode is 0600 inside a 0700 directory — same permissions discipline as
@@ -38,8 +39,12 @@
 #
 # Never exits non-zero. Never blocks the calling hook.
 
-# Config dir and file paths.
-USER_TOKEN_CONFIG_DIR="${HOME}/.config/axonflow"
+# Config dir and file paths. AXONFLOW_CONFIG_DIR is a supported override
+# honored by every other config-dir consumer (self-hosted-auth.sh, status.sh,
+# and the .mcp.json inline headersHelper's `cfg=` resolution) — this resolver
+# must honor it too, or a fleet that relocates the config dir gets the token
+# on the MCP plane but not the hooks (#108's drift class on the dir axis).
+USER_TOKEN_CONFIG_DIR="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}"
 USER_TOKEN_FILE="${USER_TOKEN_CONFIG_DIR}/user-token.json"
 
 # user_token_looks_valid — sanity-gate a candidate token before it goes on
