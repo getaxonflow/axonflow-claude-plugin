@@ -45,7 +45,7 @@ command -v jq &>/dev/null || { return 0 2>/dev/null || exit 0; }
 HAS_FLOCK=1
 command -v flock &>/dev/null || HAS_FLOCK=0
 
-CONFIG_DIR="${HOME}/.config/axonflow"
+CONFIG_DIR="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}"
 REGISTRATION_FILE="${CONFIG_DIR}/try-registration.json"
 LOCK_FILE="${CONFIG_DIR}/try-registration.lock"
 LOCK_DIR="${CONFIG_DIR}/try-registration.lock.d"

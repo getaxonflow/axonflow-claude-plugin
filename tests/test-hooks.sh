@@ -8,6 +8,11 @@
 #   ./tests/test-hooks.sh --live       # Tests against live AxonFlow on localhost:8080
 set -euo pipefail
 
+# Hermetic: the hooks' credential resolvers honor AXONFLOW_CONFIG_DIR — a
+# host value pointing at a dir with real credential files would leak into
+# every leg below, which only override HOME/XDG paths.
+unset AXONFLOW_CONFIG_DIR
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PRE_HOOK="$PLUGIN_DIR/scripts/pre-tool-check.sh"

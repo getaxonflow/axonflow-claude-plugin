@@ -315,7 +315,11 @@ echo "--- Leg 3: malformed env token + valid 0600 file (cross-plane equivalence,
 if [ "$GATE_ON" != "true" ]; then
   echo "SKIP: leg 3a (hook-plane session-keyed attribution) — needs AXONFLOW_TRUST_IDENTITY_HEADERS=true on the agent."
 else
-  echo "{\"session_id\":\"$SID3\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"}}" \
+  # The destructive command guarantees a policy match — check_policy writes
+  # its canonical audit row only when a policy fires, so a benign command
+  # would produce NO row and false-fail this leg (latent until the first
+  # gate-ON live run; leg 1 uses the same payload for the same reason).
+  echo "{\"session_id\":\"$SID3\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
     | env HOME="$HOME3" AXONFLOW_USER_EMAIL="forged3-$(date +%s)@example.com" \
       AXONFLOW_USER_TOKEN="$MALFORMED_ENV" "$PRE_HOOK" >/dev/null 2>&1
   CHK3=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$TOKEN_EMAIL_CANON' AND session_id='$SID3';" 1)
@@ -353,6 +357,37 @@ else
   errors=$((errors + 1))
 fi
 rm -rf "$HOME3"
+
+# ---------------------------------------------------------------------------
+# Leg 4 — RELOCATED CONFIG DIR (AXONFLOW_CONFIG_DIR parity class, #111/#112):
+# the credential files live ONLY under $AXONFLOW_CONFIG_DIR (fresh empty
+# HOME). The REAL pre-tool hook must resolve the 0600 user-token.json from
+# the relocated dir and the live platform must attribute the audit row to
+# the token's validated email — proving the AXONFLOW_CONFIG_DIR override
+# end-to-end through user-token.sh live (license-token.sh's relocation is
+# pinned at unit level by tests/test-license-token-cache-skip.sh leg I).
+# Session-keyed like leg 1, so it needs the identity trust gate on.
+# ---------------------------------------------------------------------------
+if [ "$GATE_ON" != "true" ]; then
+  echo "SKIP: leg 4 (relocated config dir) — session-keyed attribution needs AXONFLOW_TRUST_IDENTITY_HEADERS=true on the agent."
+else
+  SID4="e2e-cfgdir-sess-$(date +%s)-$RANDOM"
+  HOME4="$(mktemp -d)"
+  CFG4="$(mktemp -d)"
+  printf '{"token":"%s"}' "$TOKEN" > "$CFG4/user-token.json"
+  chmod 600 "$CFG4/user-token.json"
+  echo "--- Leg 4: relocated config dir (AXONFLOW_CONFIG_DIR, 0600 file only source) ---"
+  echo "{\"session_id\":\"$SID4\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
+    | env -u AXONFLOW_USER_TOKEN HOME="$HOME4" AXONFLOW_CONFIG_DIR="$CFG4" "$PRE_HOOK" >/dev/null 2>&1
+  CHK4=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$TOKEN_EMAIL_CANON' AND session_id='$SID4';" 1)
+  if [ "${CHK4:-0}" -ge 1 ]; then
+    echo "PASS: relocated-config-dir token attributed the audit row (validated email via AXONFLOW_CONFIG_DIR)"
+  else
+    echo "FAIL: no mcp_check_policy row with user_email=$TOKEN_EMAIL_CANON session_id=$SID4 (relocated dir not honored end-to-end)"
+    errors=$((errors + 1))
+  fi
+  rm -rf "$HOME4" "$CFG4"
+fi
 
 echo ""
 if [ "$errors" -ne 0 ]; then

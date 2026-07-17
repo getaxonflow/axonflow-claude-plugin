@@ -241,7 +241,7 @@ fi
 # order: ORG_ID env (operator-supplied on self-hosted) → tenant_id from
 # ~/.config/axonflow/try-registration.json (Community SaaS cs_<uuid>) →
 # "local-dev-org" sentinel. Always emitted.
-REGISTRATION_FILE="${HOME}/.config/axonflow/try-registration.json"
+REGISTRATION_FILE="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}/try-registration.json"
 if [ -n "${ORG_ID:-}" ]; then
   ORG_ID_VALUE="$ORG_ID"
 elif [ -f "$REGISTRATION_FILE" ]; then

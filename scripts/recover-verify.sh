@@ -107,7 +107,7 @@ fi
 # Persist to ~/.config/axonflow/try-registration.json — same file the
 # Community-SaaS bootstrap reads on every hook invocation. Atomic write
 # with 0600 perms inside a 0700 directory.
-CONFIG_DIR="${HOME}/.config/axonflow"
+CONFIG_DIR="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}"
 REG_FILE="${CONFIG_DIR}/try-registration.json"
 mkdir -p "$CONFIG_DIR" 2>/dev/null && chmod 0700 "$CONFIG_DIR" 2>/dev/null
 TMP="${REG_FILE}.tmp.$$"
@@ -125,7 +125,7 @@ if (umask 077 && jq -n \
   :
 else
   rm -f "$TMP" 2>/dev/null
-  echo "ERR  Recovery succeeded but failed to persist credentials to $REG_FILE — run chmod 700 ~/.config/axonflow and retry, or save manually:" >&2
+  echo "ERR  Recovery succeeded but failed to persist credentials to $REG_FILE — run chmod 700 on the config dir (${AXONFLOW_CONFIG_DIR:-~/.config/axonflow}) and retry, or save manually:" >&2
   echo "     tenant_id=${TENANT_ID}" >&2
   echo "     secret=${SECRET}" >&2
   exit 1
