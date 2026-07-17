@@ -152,6 +152,7 @@ TRUNCATED_OUTPUT=$(echo "$TOOL_RESPONSE" | jq -c '.' 2>/dev/null | cut -c1-500 |
           arguments: {
             tool_name: $tn,
             caller_name: "claude_code",
+            tool_type: "claude_code",
             input: ($ti | fromjson? // {}),
             output: {summary: $out},
             success: $success,

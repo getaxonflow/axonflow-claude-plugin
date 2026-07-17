@@ -199,7 +199,7 @@ fi
 # daily_usage at the cap and emits the V1 Plugin Pro 429 envelope.
 # ---------------------------------------------------------------------------
 echo "Step 3: capture wire envelope from /api/v1/audit/tool-call (expect 429 V1 envelope)"
-PAYLOAD='{"tool_name":"v1_envelope_e2e","tool_type":"runtime_e2e","input":{"probe":"daily_quota_envelope"},"success":true}'
+PAYLOAD='{"tool_name":"v1_envelope_e2e","caller_name":"runtime_e2e","tool_type":"runtime_e2e","input":{"probe":"daily_quota_envelope"},"success":true}'
 TRIP_LOG="$EVIDENCE/trip_loop.log"
 ENVELOPE_BODY="$EVIDENCE/envelope_body.json"
 ENVELOPE_HEADERS="$EVIDENCE/envelope_headers.txt"
