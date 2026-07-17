@@ -44,7 +44,7 @@ if [ "${1:-}" = "--self-hosted" ]; then
     echo "    Restart any open Claude Code session for the credential to take effect on the MCP server connection (headersHelper only fires at session start)."
     exit 0
   else
-    echo "ERR  Failed to write ${SELF_HOSTED_AUTH_FILE}. Check perms on ~/.config/axonflow." >&2
+    echo "ERR  Failed to write ${SELF_HOSTED_AUTH_FILE}. Check perms on the config dir (${AXONFLOW_CONFIG_DIR:-~/.config/axonflow})." >&2
     exit 1
   fi
 fi
@@ -68,6 +68,6 @@ if save_license_token_to_file "$TOKEN"; then
   echo "    Restart any open Claude Code session for the new token to take effect on the MCP server connection (headersHelper only fires at session start)."
   exit 0
 else
-  echo "ERR  Failed to write ${LICENSE_TOKEN_FILE}. Check perms on ~/.config/axonflow." >&2
+  echo "ERR  Failed to write ${LICENSE_TOKEN_FILE}. Check perms on the config dir (${AXONFLOW_CONFIG_DIR:-~/.config/axonflow})." >&2
   exit 1
 fi

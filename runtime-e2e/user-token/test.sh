@@ -363,8 +363,9 @@ rm -rf "$HOME3"
 # the credential files live ONLY under $AXONFLOW_CONFIG_DIR (fresh empty
 # HOME). The REAL pre-tool hook must resolve the 0600 user-token.json from
 # the relocated dir and the live platform must attribute the audit row to
-# the token's validated email — proving the override end-to-end through the
-# same resolver family (user-token.sh / license-token.sh) this class spans.
+# the token's validated email — proving the AXONFLOW_CONFIG_DIR override
+# end-to-end through user-token.sh live (license-token.sh's relocation is
+# pinned at unit level by tests/test-license-token-cache-skip.sh leg I).
 # Session-keyed like leg 1, so it needs the identity trust gate on.
 # ---------------------------------------------------------------------------
 if [ "$GATE_ON" != "true" ]; then

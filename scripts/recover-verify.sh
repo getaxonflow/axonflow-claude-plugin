@@ -125,7 +125,7 @@ if (umask 077 && jq -n \
   :
 else
   rm -f "$TMP" 2>/dev/null
-  echo "ERR  Recovery succeeded but failed to persist credentials to $REG_FILE — run chmod 700 ~/.config/axonflow and retry, or save manually:" >&2
+  echo "ERR  Recovery succeeded but failed to persist credentials to $REG_FILE — run chmod 700 on the config dir (${AXONFLOW_CONFIG_DIR:-~/.config/axonflow}) and retry, or save manually:" >&2
   echo "     tenant_id=${TENANT_ID}" >&2
   echo "     secret=${SECRET}" >&2
   exit 1
