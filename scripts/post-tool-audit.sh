@@ -151,7 +151,7 @@ TRUNCATED_OUTPUT=$(echo "$TOOL_RESPONSE" | jq -c '.' 2>/dev/null | cut -c1-500 |
           name: "audit_tool_call",
           arguments: {
             tool_name: $tn,
-            tool_type: "claude_code",
+            caller_name: "claude_code",
             input: ($ti | fromjson? // {}),
             output: {summary: $out},
             success: $success,

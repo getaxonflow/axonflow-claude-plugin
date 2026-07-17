@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **`audit_tool_call` now sends `caller_name` instead of `tool_type` to identify the calling plugin** (axonflow-enterprise#2912, sub-issue of epic #2905). `tool_type` was misleadingly named — it was never a tool classification, it identified WHICH CLIENT made the call. The platform side (axonflow-enterprise#2953 — implemented, not yet merged at the time of this change) adds the correctly-named `caller_name` field for this purpose; `tool_type` still works as a legacy fallback on platforms that have it, but is deprecated. Updated both `audit_tool_call` send sites — `scripts/post-tool-audit.sh` (PostToolUse) and `scripts/pre-tool-check.sh` (the blocked/redacted PreToolUse audit POSTs) — so every `audit_tool_call` call from this plugin now sends `caller_name: "claude_code"` instead of `tool_type`. **Do not deploy this version ahead of axonflow-enterprise#2953**: since this is a straight field swap rather than a dual-send, a platform that hasn't upgraded yet won't recognize `caller_name` and will lose caller attribution (falling back to "unknown"/default) until it does.
+
 ## [1.10.0] - 2026-07-16 — per-user authorization token (X-User-Token) on every governed request
 
 ### Added
