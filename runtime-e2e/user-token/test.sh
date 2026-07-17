@@ -115,6 +115,14 @@ ROWS0=$(wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID0';" 2
 if [ "${ROWS0:-0}" -ge 2 ]; then
   echo "PASS: unconfigured plugin — governed rows written on both planes (no behavior change)"
 else
+  # Pollution window (accepted): this fallback counts ANY client-scoped rows
+  # since RUN_T0 — on a SHARED gate-ON stack where this run's hooks failed to
+  # reach the agent, concurrent mcp-client traffic could satisfy it and flip
+  # GATE_ON=false (legs 1/3a then SKIP with a visible notice, never a false
+  # PASS of a session-keyed assertion). Client-scoped rows carry no run key
+  # to filter on by design — that anonymity is the very behavior under test —
+  # so the harness accepts the window and documents it; run against a
+  # dedicated stack (the documented setup) for a razor-sharp gate signal.
   ROWS0CS=$(wait_count "SELECT count(*) FROM audit_logs WHERE user_email LIKE 'mcp-client:%' AND coalesce(session_id,'')='' AND request_type IN ('mcp_check_policy','tool_call_audit') AND timestamp >= '$RUN_T0';" 2)
   if [ "${ROWS0CS:-0}" -ge 2 ]; then
     GATE_ON=false
@@ -339,9 +347,9 @@ LEG3_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
   -H "X-User-Token: $UT3" \
   -d '{"jsonrpc":"2.0","id":"leg3","method":"tools/list"}')
 if [ "$LEG3_CODE" = "200" ]; then
-  echo "PASS: MCP plane — live platform accepted the inline's emitted headers (HTTP 200; junk probe was 401)"
+  echo "PASS: MCP plane — live platform accepted the inline-resolved token (HTTP 200; junk probe was 401)"
 else
-  echo "FAIL: MCP plane — live platform rejected the inline's emitted headers (HTTP $LEG3_CODE)"
+  echo "FAIL: MCP plane — live platform rejected the inline-resolved token (HTTP $LEG3_CODE)"
   errors=$((errors + 1))
 fi
 rm -rf "$HOME3"

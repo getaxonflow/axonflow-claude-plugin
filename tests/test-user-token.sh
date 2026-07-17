@@ -32,9 +32,12 @@ GOOD_TOKEN='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6ImRldkBleGFtcGxlLmN
 # the resolved AXONFLOW_USER_TOKEN (stdout) so assertions stay hermetic.
 # Stderr passes through to the caller's capture.
 resolve() {
-  local home="$1" envtok="$2"
+  local home="$1" envtok="$2" cfgdir="${3:-}"
   (
     export HOME="$home"
+    # Hermetic: a host AXONFLOW_CONFIG_DIR must not bleed into legs that
+    # exercise the $HOME default; leg 6c passes it explicitly.
+    if [ -n "$cfgdir" ]; then export AXONFLOW_CONFIG_DIR="$cfgdir"; else unset AXONFLOW_CONFIG_DIR; fi
     if [ -n "$envtok" ]; then export AXONFLOW_USER_TOKEN="$envtok"; else unset AXONFLOW_USER_TOKEN; fi
     # shellcheck disable=SC1091
     . "$ROOT/scripts/user-token.sh"
@@ -130,6 +133,25 @@ OUT="$(resolve "$WORK/home2" 'bad token with spaces' 2>/dev/null)"
 [ -z "$OUT" ] && pass "malformed env + malformed file token → both dropped" \
   || fail "malformed env + malformed file resolved: $OUT"
 
+# 6c) AXONFLOW_CONFIG_DIR parity (#109 R3 follow-up): the relocated config
+#     dir is a supported override honored by the .mcp.json inline
+#     headersHelper (`cfg=`), self-hosted-auth.sh, and status.sh — the
+#     resolver must read the token file from it too, with the SAME 0600
+#     discipline, or a relocated fleet gets the token on the MCP plane but
+#     not the hooks (the #108 drift class on the dir axis). Inline twin:
+#     tests/test-mcp-headers.sh leg 30.
+CFGDIR="$WORK/cfgdir-6c"
+mkdir -p "$CFGDIR"
+printf '{"token":"cfgdir.tok.value"}' > "$CFGDIR/user-token.json"
+chmod 600 "$CFGDIR/user-token.json"
+OUT="$(resolve "$WORK/no-home" '' "$CFGDIR" 2>/dev/null)"
+[ "$OUT" = "cfgdir.tok.value" ] && pass "AXONFLOW_CONFIG_DIR override: 0600 token file resolves from the relocated dir" \
+  || fail "AXONFLOW_CONFIG_DIR token file did not resolve: '$OUT'"
+chmod 644 "$CFGDIR/user-token.json"
+OUT="$(resolve "$WORK/no-home" '' "$CFGDIR" 2>/dev/null)"
+[ -z "$OUT" ] && pass "AXONFLOW_CONFIG_DIR override: 0644 token file still refused (perm gate follows the dir)" \
+  || fail "AXONFLOW_CONFIG_DIR 0644 file resolved: '$OUT'"
+
 # 7) A trailing-newline-only artifact never happens via jq -r (it strips it),
 #    but an env var exported with a literal trailing space must be dropped,
 #    not silently "fixed" — a stripped token would fail HS256 verification
@@ -140,6 +162,12 @@ OUT="$(resolve "$WORK/no-home" "${GOOD_TOKEN} " 2>/dev/null)"
 
 echo ""
 echo "== mcp-auth-headers.sh reference impl =="
+
+# Hermetic: the resolver honors AXONFLOW_CONFIG_DIR (see leg 6c), so a host
+# value pointing at a real token dir would leak into the reference-impl legs
+# below, which only override HOME. Scrub it here; legs that exercise the
+# override set it explicitly per-invocation.
+unset AXONFLOW_CONFIG_DIR
 
 # 8) Configured → X-User-Token present in the emitted JSON.
 OUT="$(HOME="$WORK/no-home" AXONFLOW_AUTH='dGVzdA==' AXONFLOW_ENDPOINT='http://selfhosted.local' \

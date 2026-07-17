@@ -13,6 +13,12 @@
 
 set -uo pipefail
 
+# Hermetic: the inline headersHelper resolves its config dir from
+# AXONFLOW_CONFIG_DIR — a host value pointing at a dir with real credentials
+# would leak into every leg below, which only override HOME. Scrub it; leg 30
+# (the config-dir pin) sets it explicitly per-invocation.
+unset AXONFLOW_CONFIG_DIR
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MCP_JSON="$ROOT/.mcp.json"
 fail=0
@@ -424,6 +430,22 @@ else
   echo "FAIL: env precedence broken by the #108 restructure: $OUT"; fail=1
 fi
 rm -rf "$TMPHOME"
+
+# 30) AXONFLOW_CONFIG_DIR parity (#109 R3 follow-up): the inline resolves the
+#     token file under cfg="${AXONFLOW_CONFIG_DIR:-$HOME/.config/axonflow}" —
+#     pin that a relocated config dir yields the token WITHOUT any $HOME file,
+#     matching the resolver (tests/test-user-token.sh leg 6c) so the two
+#     planes cannot drift on the dir axis.
+CFGDIR="$(mktemp -d)"
+printf '{"token":"cfgdir.tok.value"}' > "$CFGDIR/user-token.json"
+chmod 600 "$CFGDIR/user-token.json"
+OUT="$(HOME=/nonexistent-empty-home AXONFLOW_CONFIG_DIR="$CFGDIR" AXONFLOW_AUTH='dGVzdA==' /bin/sh -c "cd / && $HH")"
+if [ "$(printf '%s' "$OUT" | jq -r '."X-User-Token" // empty')" = "cfgdir.tok.value" ]; then
+  echo "PASS: inline honors AXONFLOW_CONFIG_DIR for the token file (matches the resolver)"
+else
+  echo "FAIL: inline did not resolve the token from AXONFLOW_CONFIG_DIR: $OUT"; fail=1
+fi
+rm -rf "$CFGDIR"
 
 echo ""
 if [ "$fail" -ne 0 ]; then

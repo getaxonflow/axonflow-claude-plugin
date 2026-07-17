@@ -38,11 +38,12 @@ post-#2929 enterprise platform rejects it.
 `X-User-Email` label ride `AXONFLOW_TRUST_IDENTITY_HEADERS`, which defaults
 OFF. A gate-off platform still governs and audits every request but
 attributes rows to the client-scoped identity (`mcp-client:<org>`, empty
-`session_id`) — documented platform behavior, not a plugin fault. The harness
-detects that after leg 1 and passes leg 1 on the client-scoped criterion; the
-session-keyed per-user attribution assertions (legs 2 and the hook half of
-leg 4) then SKIP with a notice, while the fail-closed leg 3 and the
-MCP-inline half of leg 4 still run.
+`session_id`) — documented platform behavior, not a plugin fault. Using the
+script's own leg names (`Leg 0`–`Leg 3` in the output): the harness detects
+the gate state during Leg 0 and passes it on the client-scoped criterion; the
+session-keyed per-user attribution assertions (Leg 1, and the hook half of
+Leg 3 — "leg 3a") then SKIP with a notice, while the fail-closed Leg 2 and
+the MCP-inline half of Leg 3 ("leg 3b") still run.
 
 **Prereqs:** `jq`, `curl`, `psql`, `python3` on PATH; a live agent at
 `$AXONFLOW_ENDPOINT` (default `http://localhost:8080`); an enterprise Basic

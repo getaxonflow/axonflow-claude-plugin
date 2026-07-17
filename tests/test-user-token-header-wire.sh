@@ -21,6 +21,13 @@
 
 set -uo pipefail
 
+# Hermetic: the hooks' token resolver honors AXONFLOW_CONFIG_DIR — a host
+# value pointing at a dir with a real token would make every "unconfigured"
+# leg below resolve it (run_hook only overrides HOME). This suite never
+# exercises the override; the config-dir pin lives in tests/test-user-token.sh
+# leg 6c and tests/test-mcp-headers.sh leg 30.
+unset AXONFLOW_CONFIG_DIR
+
 PLUGIN_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PRE_HOOK="$PLUGIN_DIR/scripts/pre-tool-check.sh"
 POST_HOOK="$PLUGIN_DIR/scripts/post-tool-audit.sh"
