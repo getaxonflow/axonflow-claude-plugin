@@ -450,6 +450,7 @@ if [ "$REQUIRES_REDACTION" = "true" ] && [ -n "$REDACTED_STATEMENT" ]; then
           name: "audit_tool_call",
           arguments: {
             tool_name: $tn,
+            caller_name: "claude_code",
             tool_type: "claude_code",
             input: {statement: "[redacted]"},
             output: {policy_decision: "redacted", policies_evaluated: $policies},
@@ -492,6 +493,7 @@ if [ "$ALLOWED" = "false" ]; then
           name: "audit_tool_call",
           arguments: {
             tool_name: $tn,
+            caller_name: "claude_code",
             tool_type: "claude_code",
             input: {statement: $stmt},
             output: {policy_decision: "blocked", block_reason: $reason, policies_evaluated: $policies},
