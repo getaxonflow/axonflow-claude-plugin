@@ -107,7 +107,7 @@ fi
 # Persist to ~/.config/axonflow/try-registration.json — same file the
 # Community-SaaS bootstrap reads on every hook invocation. Atomic write
 # with 0600 perms inside a 0700 directory.
-CONFIG_DIR="${HOME}/.config/axonflow"
+CONFIG_DIR="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}"
 REG_FILE="${CONFIG_DIR}/try-registration.json"
 mkdir -p "$CONFIG_DIR" 2>/dev/null && chmod 0700 "$CONFIG_DIR" 2>/dev/null
 TMP="${REG_FILE}.tmp.$$"

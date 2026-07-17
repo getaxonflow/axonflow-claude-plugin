@@ -56,7 +56,7 @@ assert() {
 # is sufficient if license-token.sh resolves via $HOME. Source it and override the
 # computed file path to point at our test fixture.
 source_under_test() {
-  unset AXONFLOW_LICENSE_TOKEN AXONFLOW_ENDPOINT AXONFLOW_AUTH
+  unset AXONFLOW_LICENSE_TOKEN AXONFLOW_ENDPOINT AXONFLOW_AUTH AXONFLOW_CONFIG_DIR
   # Provide caller-set vars
   for kv in "$@"; do
     eval "export $kv"
@@ -74,7 +74,7 @@ source_under_test() {
 # A second source_under_test that returns the compat verdict instead of the
 # token value, so we can assert both surfaces.
 compat_under_test() {
-  unset AXONFLOW_LICENSE_TOKEN AXONFLOW_ENDPOINT AXONFLOW_AUTH
+  unset AXONFLOW_LICENSE_TOKEN AXONFLOW_ENDPOINT AXONFLOW_AUTH AXONFLOW_CONFIG_DIR
   for kv in "$@"; do
     eval "export $kv"
   done
@@ -131,6 +131,26 @@ SELF_HOSTED_B64=$(echo -n "$SELF_HOSTED_PAYLOAD" | python3 -c "import sys,base64
 SELF_HOSTED_TOKEN="AXON-${SELF_HOSTED_B64}.AAAA"
 RESULT=$(compat_under_test AXONFLOW_LICENSE_TOKEN="$SELF_HOSTED_TOKEN" AXONFLOW_ENDPOINT="http://localhost:8080")
 assert "H self-hosted-aud token + self-hosted endpoint = compat" "$RESULT" "compat"
+
+# I) AXONFLOW_CONFIG_DIR parity: the resolver reads license-token.json from
+#    the relocated config dir — matching the inline .mcp.json headersHelper,
+#    self-hosted-auth.sh, status.sh, and user-token.sh — so a relocated
+#    fleet gets X-License-Token on the hook plane too (and login.sh, which
+#    derives LICENSE_TOKEN_FILE from this script, persists where the
+#    readers look).
+CFGDIR=$(mktemp -d)
+printf '{"token":"AXON-cfgdir-parity-token-00000000000000000000"}' > "$CFGDIR/license-token.json"
+chmod 600 "$CFGDIR/license-token.json"
+RESULT=$( (
+  unset AXONFLOW_LICENSE_TOKEN AXONFLOW_ENDPOINT AXONFLOW_AUTH
+  export AXONFLOW_CONFIG_DIR="$CFGDIR" HOME=/nonexistent-empty-home
+  # shellcheck source=../scripts/license-token.sh
+  source "$PLUGIN_ROOT/scripts/license-token.sh"
+  resolve_license_token
+  echo "${AXONFLOW_LICENSE_TOKEN:-}"
+) )
+assert "I AXONFLOW_CONFIG_DIR relocated license-token.json resolves" "$RESULT" "AXON-cfgdir-parity-token-00000000000000000000"
+rm -rf "$CFGDIR"
 
 echo
 echo "=== license-token cache-skip + endpoint-compat regression: $PASS passed, $FAIL failed ==="

@@ -31,7 +31,13 @@
 # Never exits non-zero. Never blocks the calling hook.
 
 # Config dir and file paths.
-LICENSE_TOKEN_CONFIG_DIR="${HOME}/.config/axonflow"
+# AXONFLOW_CONFIG_DIR is the supported config-dir override — the inline
+# .mcp.json headersHelper, self-hosted-auth.sh, status.sh, and user-token.sh
+# all honor it. The license-token reader (hooks) and writer (login.sh
+# persist) must follow the same dir or a relocated fleet gets X-License-Token
+# on the MCP plane but not the hooks, and /axonflow-login writes a token
+# nothing reads.
+LICENSE_TOKEN_CONFIG_DIR="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}"
 LICENSE_TOKEN_FILE="${LICENSE_TOKEN_CONFIG_DIR}/license-token.json"
 
 # Token shape sanity check. AXON-prefixed tokens are issued by the platform
