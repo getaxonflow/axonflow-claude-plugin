@@ -7,9 +7,14 @@
 # that build the audit_tool_call MCP call — against a LIVE AxonFlow agent (no
 # mocks), then asserts the resulting canonical `audit_logs` rows carry
 # `policy_details.caller_name = "claude_code"` and NEVER `policy_details.tool_type`
-# for new rows. The platform (axonflow-enterprise#2953) accepts caller_name as
-# the correctly-named replacement for the misleadingly-named tool_type field —
-# tool_type identified WHICH CLIENT called, not a tool classification.
+# for new rows. The platform (axonflow-enterprise#2953, shipped in platform
+# 9.11.0) accepts caller_name as the correctly-named replacement for the
+# misleadingly-named tool_type field — tool_type identified WHICH CLIENT
+# called, not a tool classification. Note: the plugin's wire payload
+# dual-sends BOTH caller_name and legacy tool_type (CHANGELOG 1.11.0
+# transition-window compat for pre-#2953 platforms) — this test asserts the
+# DB-row outcome on a #2953+ platform, where caller_name always wins and
+# tool_type is never persisted, regardless of what the wire payload carries.
 #
 # Two send sites are exercised, matching the two places this plugin was
 # changed:
@@ -132,9 +137,13 @@ else
   errors=$((errors + 1))
 fi
 
-# Belt-and-suspenders: tool_type must appear on NO row for this session — the
-# plugin no longer sends it from either send site, so if the platform ever
-# regressed to reading a stale field, this would catch it as a positive hit.
+# Belt-and-suspenders: tool_type must appear on NO row for this session. The
+# plugin now dual-sends legacy tool_type alongside caller_name on the wire
+# (transition-window compat for pre-#2953 platforms — see CHANGELOG 1.11.0),
+# but a #2953+ platform must still resolve caller_name -> tool_type -> default
+# and persist ONLY caller_name to policy_details for new rows, never tool_type.
+# If the platform ever regressed to writing the legacy field back out, this
+# would catch it as a positive hit.
 LEAKED_TOOL_TYPE=$(query "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND session_id='$SID' AND policy_details ? 'tool_type';")
 if [ "${LEAKED_TOOL_TYPE:-1}" -eq 0 ]; then
   echo "PASS: no tool_call_audit row for this session carries the deprecated tool_type key"
