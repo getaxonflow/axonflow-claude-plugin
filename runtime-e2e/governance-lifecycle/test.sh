@@ -68,10 +68,9 @@ case "$PROBE_STATUS" in
     fi
     ;;
   *)
-    echo "SKIP: pre-flight create_override probe on $TEST_POLICY_ID returned HTTP $PROBE_STATUS"
-    echo "      Stack may be missing migration 076 (severity=critical => allow_override=FALSE) or"
-    echo "      $TEST_POLICY_ID may have drifted. Probe body: $PROBE_BODY"
-    exit 0
+    require_override_preflight "$PROBE_STATUS" "$PROBE_BODY" \
+      "Probe policy was $TEST_POLICY_ID — it may also have drifted."
+    exit 1
     ;;
 esac
 

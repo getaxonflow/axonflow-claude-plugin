@@ -167,3 +167,58 @@ assert_no_raw_oauth_404() {
   local f="$1"
   ! grep -qiE 'Invalid OAuth error response|Raw body: 404 page not found' "$f"
 }
+
+# require_override_preflight <http_status> <body> [extra_hint]
+#
+# Classifies the result of the override-create pre-flight the override
+# lifecycle tests use to seed state. Every one of them previously printed
+# `SKIP: pre-flight create_override returned HTTP $STATUS` and exited 0 on ANY
+# non-201 — so they passed-by-skipping in exactly the default configuration
+# every user runs (#3062): the agent strips X-User-Email unless
+# AXONFLOW_TRUST_IDENTITY_HEADERS=true, so create_override 401s and the suite
+# reported green while two of the eleven advertised tools were dead.
+#
+# A test that skips is not a test. The ONLY legitimate exit-0 here is
+# environment unavailability, which the harness checks before this point. A
+# reachable stack that refuses to create an override is a FAILURE, and this
+# prints the remediation instead of swallowing it.
+require_override_preflight() {
+  local status="$1"
+  local body="$2"
+  local extra_hint="${3:-}"
+
+  if [ "$status" = "201" ]; then
+    return 0
+  fi
+
+  echo "FAIL: pre-flight create_override returned HTTP $status (expected 201)"
+  echo "      Body: $body"
+  [ -n "$extra_hint" ] && echo "      $extra_hint"
+  echo ""
+
+  case "$status" in
+    401)
+      echo "      The override endpoints require a per-user identity. This deployment"
+      echo "      is not configured to trust client-asserted identity headers, so the"
+      echo "      AxonFlow Agent removed the X-User-Email this test sent."
+      echo ""
+      echo "      Set the posture this test requires, then re-run:"
+      echo "        AXONFLOW_TRUST_IDENTITY_HEADERS=true   # on the AGENT, then restart it"
+      echo ""
+      echo "      Only enable it when every hop that can reach the agent asserts"
+      echo "      end-user identity from a validated source — see"
+      echo "      docs/security/identity-header-trust.md in axonflow-enterprise."
+      ;;
+    403)
+      echo "      The stack rejected the override on policy grounds. Check the seed"
+      echo "      policy is overridable (not critical-risk, allow_override=true) —"
+      echo "      migration 076 sets severity=critical => allow_override=FALSE."
+      ;;
+    404)
+      echo "      The seed policy was not found for this tenant. Confirm the stack's"
+      echo "      migrations ran and that X-Tenant-ID matches the seeded tenant."
+      ;;
+  esac
+
+  return 1
+}
