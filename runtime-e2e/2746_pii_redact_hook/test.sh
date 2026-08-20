@@ -14,9 +14,14 @@
 #   When:  pre-tool-check.sh receives a Write with no PII
 #   Then:  the hook emits no output (allow / no opinion).
 #
-# Skip conditions (graceful):
+# Skip conditions (graceful, environment availability only):
+#   - jq / curl not on PATH
 #   - AXONFLOW_ENDPOINT agent not reachable at /health
-#   - Agent not configured with PII_ACTION=redact (detected via probe)
+#
+# A reachable agent that does not return requires_redaction=true for a NIK
+# statement is a FAILURE (#117), not a skip: either the required
+# PII_ACTION=redact posture is missing (the failure message names it) or the
+# PII detection path is broken.
 #
 # Per HARD RULE #0: no mocks. The hook calls the real agent; the agent must
 # return requires_redaction:true for the assertion to pass.
@@ -58,9 +63,22 @@ PROBE_TEXT=$(jq -r '.result.content[0].text // empty' < "$PROBE_OUT" 2>/dev/null
 PROBE_RR=$(echo "$PROBE_TEXT" | jq -r 'if has("requires_redaction") then (.requires_redaction | tostring) else "false" end' 2>/dev/null || echo "false")
 
 if [ "$PROBE_RR" != "true" ]; then
-  echo "SKIP: agent at ${AGENT_URL} did not return requires_redaction=true for NIK statement"
-  echo "      (got probe_rr=${PROBE_RR}). This E2E test requires PII_ACTION=redact on the agent."
-  exit 0
+  # Previously "SKIP:" + exit 0 (#117). This probe is the feature under test:
+  # if the agent does not flag an Indonesia NIK as requiring redaction, either
+  # the deployment is missing the posture this suite requires or the PII
+  # detection/redaction path is broken. A detector that reports "skip" when
+  # the detector fails cannot detect anything.
+  echo "FAIL: agent at ${AGENT_URL} did not return requires_redaction=true for NIK statement"
+  echo "      (got probe_rr=${PROBE_RR})"
+  echo ""
+  echo "      This suite requires the redact posture on the agent:"
+  echo "        PII_ACTION=redact   # on the AGENT, then restart it"
+  echo ""
+  echo "      If the agent IS running with PII_ACTION=redact and this still"
+  echo "      fails, the PII detection path no longer flags an Indonesia NIK."
+  echo "      That is the regression this suite exists to catch, not a reason"
+  echo "      to exit 0."
+  exit 1
 fi
 
 errors=0
