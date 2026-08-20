@@ -34,14 +34,34 @@ DECISION_ID=$(printf '%s' "$CHECK_RESPONSE" | jq -r '.decision_id // empty')
 WAS_BLOCKED=$(printf '%s' "$CHECK_RESPONSE" | jq -r '.allowed')
 
 if [ -z "$DECISION_ID" ]; then
-  echo "SKIP: mcpCheckInput did not return a decision_id"
+  # Previously "SKIP:" + exit 0 (#117). A missing decision_id means
+  # explain_decision has nothing to explain, and that absence is itself a
+  # finding: either the platform is below the floor that returns one (7.1.0+)
+  # or the check-input path is broken. Skipping here reported success for a
+  # condition this suite exists to detect.
+  echo "FAIL: mcpCheckInput did not return a decision_id (allowed=$WAS_BLOCKED)"
   echo "      response: $CHECK_RESPONSE"
-  exit 0
+  echo ""
+  echo "      Expected /api/v1/mcp/check-input to return a decision_id for the"
+  echo "      seeded statement. If allowed is not false, the block itself"
+  echo "      failed (see the next check's rationale). If the platform is"
+  echo "      below 7.1.0 it has no decision_id to return; on any supported"
+  echo "      platform this is the check-input path failing. None of these is"
+  echo "      a reason to exit 0."
+  exit 1
 fi
 if [ "$WAS_BLOCKED" != "false" ]; then
-  echo "SKIP: SQLi pattern was not blocked — pattern catalogue may have drifted"
+  # Previously "SKIP:" + exit 0 (#117): success reported for precisely the
+  # condition this suite exists to detect. A governance stack that does NOT
+  # block an obvious SQLi is a finding, not a skippable precondition.
+  echo "FAIL: SQLi pattern was not blocked (allowed=$WAS_BLOCKED)"
   echo "      response: $CHECK_RESPONSE"
-  exit 0
+  echo ""
+  echo "      Expected the stack to BLOCK an obvious OR-1=1 SQLi statement"
+  echo "      (sys_sqli_admin_bypass). If allowed=true, the stack is not"
+  echo "      enforcing the pattern catalogue. That is the finding, not a"
+  echo "      reason to skip."
+  exit 1
 fi
 echo "--- Minted decision_id: $DECISION_ID ---"
 sleep 2  # give audit logger flush time
