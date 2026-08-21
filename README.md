@@ -99,10 +99,10 @@ Public Design Partner pricing starts at $2,000; the Confidential Paid Pilot star
 
 Four short videos covering different angles of the platform:
 
-- **[Community Quickstart Demo (Code + Terminal, 2.5 min)](https://youtu.be/BSqU1z0xxCo)** — governed calls, PII block, Gateway Mode with LangChain/CrewAI, and MAP from YAML
-- **[Runtime Control Demo (Portal + Workflow, 3 min)](https://youtu.be/6UatGpn7KwE)** — approvals, retry safety, execution state, and the audit viewer
-- **[Architecture Deep Dive (12 min)](https://youtu.be/Q2CZ1qnquhg)** — how the control plane works, policy enforcement flow, and multi-agent planning
-- **[Plugin Setup & Usage Walkthrough](https://youtu.be/_dlnX_xLYmU)** — install AxonFlow and watch governance fire on real coding work (PII redaction, production-change guardrails, audit trail)
+- **[Product demos: Platform + Fraud & Risk](https://getaxonflow.com/demo/?utm_source=github&utm_medium=readme&utm_campaign=product_demo&utm_content=axonflow-claude-plugin)** - runtime enforcement, HITL approvals, audit evidence, cost visibility, and agentic payment controls
+- **[Community Quickstart walkthrough (2.5 min)](https://youtu.be/BSqU1z0xxCo)** - governed calls, PII blocking, Gateway Mode with LangChain/CrewAI, and MAP from YAML
+- **[Architecture deep dive (12 min)](https://youtu.be/Q2CZ1qnquhg)** - how the control plane works, policy enforcement flow, and multi-agent planning
+- **[Plugin setup and usage walkthrough](https://youtu.be/_dlnX_xLYmU)** - install AxonFlow and watch governance fire on real coding work (PII redaction, production-change guardrails, audit trail)
 
 ### Plugin Evaluation Tier (Free 90-day License)
 
