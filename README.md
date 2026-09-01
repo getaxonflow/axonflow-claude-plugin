@@ -508,7 +508,7 @@ axonflow-claude-plugin/
 │   ├── pre-tool-check.sh    # Policy enforcement before tool execution
 │   ├── post-tool-audit.sh   # Audit + PII scan after execution
 │   ├── mcp-auth-headers.sh  # Basic-auth header generation for MCP
-│   └── telemetry-ping.sh    # Anonymous telemetry (fires once per install)
+│   └── telemetry-ping.sh    # Anonymous heartbeat (at most once per 7 days)
 └── tests/
     ├── test-hooks.sh        # Hook regression (mock server)
     ├── E2E_TESTING_PLAYBOOK.md
@@ -535,7 +535,9 @@ For the broader validation story — explain-decision, override lifecycle, audit
 
 ## Telemetry
 
-Anonymous heartbeat at most once every 7 days per machine: plugin version, OS, architecture, bash version, AxonFlow platform version, deployment mode (community-saas / self-hosted production / self-hosted development). **Never** tool arguments, message contents, or policy data. The stamp file mtime advances only after the HTTP POST returns 2xx, so a transient network failure does not silence telemetry until the next window.
+Anonymous heartbeat at most once every 7 days per machine: plugin version, OS, architecture, bash version, AxonFlow platform version, the licence tier that platform reports about itself, deployment mode (`community_saas` / `self_hosted` / `unknown`), and endpoint type (`localhost` / `private_network` / `remote` / `unknown`). **Never** tool arguments, message contents, or policy data. The stamp file mtime advances only after the HTTP POST returns 2xx, so a transient network failure does not silence telemetry until the next window.
+
+The licence tier is a coarse bucket only — `Community`, `Evaluation`, `Professional`, `Enterprise` or `Plus`. **No licence key, no expiry date, no seat count, and no customer or organisation name** is read or sent. It is read from the `tier` field of the `/health` response the heartbeat already fetches to detect the platform version, so it costs no additional request, and it is omitted entirely whenever that probe does not answer with one.
 
 Opt out: set `AXONFLOW_TELEMETRY=off` in the environment Claude Code runs in.
 

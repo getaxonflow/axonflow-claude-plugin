@@ -2,8 +2,10 @@
 # Telemetry heartbeat — fires at most once every 7 days per machine.
 #
 # Sends a POST to checkpoint.getaxonflow.com/v1/ping with plugin version,
-# platform info (OS, arch, bash version), and AxonFlow platform version.
-# No PII, no tool arguments, no policy data.
+# platform info (OS, arch, bash version), the AxonFlow platform version, and
+# the licence tier that platform reports about itself (a coarse bucket such as
+# Community or Enterprise — no licence key, no expiry, no seat count, no
+# customer name). No PII, no tool arguments, no policy data.
 #
 # Cadence design rules (per feedback_telemetry_heartbeat_design_rules.md):
 #   1. Stamp-on-delivery, not stamp-on-attempt. The stamp file mtime is
@@ -161,16 +163,85 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 SDK_VERSION=$(jq -r '.version // "unknown"' "$PLUGIN_DIR/.claude-plugin/plugin.json" 2>/dev/null || echo "unknown")
 
-# /health probe is best-effort: 2s timeout, null on failure or missing field.
+# /health probe is best-effort: 2s timeout, ONE request. Both platform_version
+# and license_tier are read from the SAME captured response body — this probe
+# is not duplicated, and no new network call is introduced for license_tier.
 # ADR-050 §4: even unauthenticated /health probes carry X-Axonflow-Client.
 # (The Lambda checkpoint POST below is NOT to the agent — no header needed.)
+#
+# --fail makes curl discard the body and exit non-zero on 4xx/5xx, so a
+# non-2xx /health contributes NEITHER field rather than having its error body
+# parsed for one. This matches the openclaw plugin's `if (!resp.ok) return
+# null` and is the only coherent posture once two fields share one body.
+# It does not cost us the pre-init case: the agent answers HTTP 200 while
+# still initializing and reports its state in the body ("status":"starting",
+# "tier":"starting"), so that ping is still observed — see below.
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/client-header.sh"
-PLATFORM_VERSION=$(curl -s --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || echo "")
+#
+# The body is now held in a shell variable rather than streamed straight into
+# jq. No size cap is applied, deliberately: a real /health is ~6 KB and is
+# dominated by a `capabilities` map that grows every release, so any cap we
+# picked would eventually start silently dropping BOTH fields with no
+# diagnostic. jq already buffered the same document to parse it, the endpoint
+# is the user's own configured agent, and the only part that reaches the wire
+# is the tier string, which IS length-capped below.
+HEALTH_BODY=$(curl -s --fail --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null || printf '')
+
+PLATFORM_VERSION=$(printf '%s' "$HEALTH_BODY" | jq -r 'if type == "object" then (.version // empty) else empty end' 2>/dev/null || printf '')
 if [ -z "$PLATFORM_VERSION" ] || [ "$PLATFORM_VERSION" = "null" ]; then
   PLATFORM_VERSION="null"
 else
   PLATFORM_VERSION="\"${PLATFORM_VERSION}\""
+fi
+
+# license_tier — the licence tier the PLATFORM reports about ITSELF, read from
+# the `tier` key of the same /health response.
+#
+# THREE DIMENSIONS THAT SOUND ALIKE AND ARE NOT. Do not collapse any pair of
+# them; each answers a different question and they disagree routinely:
+#
+#   license_tier    WHAT LICENCE THE PLATFORM SAYS IT IS RUNNING UNDER.
+#                   Server-asserted — the plugin relays it and never derives,
+#                   guesses, or corrects it. A self-hosted install pointed at
+#                   by this plugin can be on any tier.
+#   deployment_mode WHERE THIS PLUGIN IS POINTED, classified locally from the
+#                   endpoint host (community_saas | self_hosted | unknown).
+#                   Carries no licence information whatsoever: a self_hosted
+#                   endpoint is routinely Enterprise, and community_saas is a
+#                   hosting topology, not the "Community" tier.
+#   endpoint_type   NETWORK REACHABILITY of that endpoint (localhost |
+#                   private_network | remote). Carries neither of the above.
+#
+# The value is relayed VERBATIM and never normalized here. The receiver owns
+# the canonical mapping, so a tier this build has never heard of still buckets
+# correctly server-side instead of being flattened into "unknown" by a client
+# that shipped before the tier existed. Values seen in practice today include
+# the canonical set (Community / Evaluation / Professional / Enterprise /
+# Plus), the lowercase "community" that community-mode builds default to, and
+# "starting" — the transient pre-initialisation answer, which is a real and
+# deliberately-reported state, not an error.
+#
+# OMITTED, never sent as "unknown", whenever the probe could not establish it:
+# unreachable endpoint, non-2xx, malformed or non-object body, and a `tier`
+# that is absent, blank, or not a string. Omission is the wire's existing
+# "this client did not report" signal (the field is `omitempty` server-side);
+# sending a literal "unknown" would instead assert that the platform answered
+# and said it did not know, which is a different and false claim.
+# The `type == "object"` half is defence in depth and deliberately NOT
+# load-bearing: jq already errors when asked for `.tier` of an array, string or
+# number, the error is swallowed, and the result is the same empty value. It is
+# here so the non-object case reads as intended rather than accidental. The
+# STRING check is the half that earns its keep. The mutation gate plants the
+# object check's removal as a must-SURVIVE control, so if it ever becomes
+# observable the gate says so instead of this comment quietly going stale.
+LICENSE_TIER=$(printf '%s' "$HEALTH_BODY" | jq -r 'if type == "object" and (.tier | type) == "string" then .tier else empty end' 2>/dev/null || printf '')
+# A hostile or broken endpoint controls this string. The canonical set is
+# short ("EnterprisePlus" is the longest at 14 characters), so anything past
+# 64 is not a tier: drop it rather than ship it, and drop rather than truncate
+# — a truncated value would be a tier the platform never actually reported.
+if [ "${#LICENSE_TIER}" -gt 64 ]; then
+  LICENSE_TIER=""
 fi
 
 # v1 telemetry-schema (#2008) classifiers. deployment_mode is derived from
@@ -262,6 +333,7 @@ PAYLOAD=$(jq -n \
   --arg endpoint_type "$ENDPOINT_TYPE" \
   --arg instance_id "$INSTANCE_ID" \
   --arg org_id "$ORG_ID_VALUE" \
+  --arg license_tier "$LICENSE_TIER" \
   --argjson hook_count "$HOOK_COUNT" \
   --argjson platform_version "$PLATFORM_VERSION" \
   '{
@@ -277,7 +349,8 @@ PAYLOAD=$(jq -n \
     features: ["hooks:\($hook_count)"],
     instance_id: $instance_id,
     org_id: $org_id
-  }' 2>/dev/null)
+  }
+  + (if $license_tier == "" then {} else { license_tier: $license_tier } end)' 2>/dev/null)
 
 if [ -z "$PAYLOAD" ]; then
   exit 0

@@ -1,12 +1,14 @@
-# Runtime E2E — v1 telemetry-schema heartbeat (#2008)
+# Runtime E2E - v1 telemetry-schema heartbeat (#2008)
 
 Drives the plugin's `pre-tool-check.sh` hook against a real local
 checkpoint server, captures the actual heartbeat payload off the wire,
-and asserts the four v1-schema fields: `telemetry_type`,
-`deployment_mode`, `endpoint_type`, `profile`.
+and asserts the v1-schema fields: `telemetry_type`, `deployment_mode`,
+`endpoint_type`, `profile`, `org_id`, and `license_tier` - the last
+being the platform's own licence tier, relayed verbatim from the `tier`
+key of the `/health` response the heartbeat already fetches (#3619).
 
 This wrapper delegates to `tests/heartbeat-real-stack/run_real_stack.sh`
-which is the canonical telemetry runtime-proof harness — it predates
+which is the canonical telemetry runtime-proof harness - it predates
 the `runtime-e2e/` directory convention but exercises exactly the same
 real-runtime path the gate is asking for.
 

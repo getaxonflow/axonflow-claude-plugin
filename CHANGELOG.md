@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **The usage heartbeat now reports the licence tier the platform states about itself, as `license_tier`** (axonflow-enterprise#3619). Telemetry could not previously attribute a ping to an edition or licence state: `sdk`, `sdk_version` and `platform_version` say which client and which build, and `deployment_mode` says which topology, but nothing said whether the platform behind it was running Community, Evaluation, Professional, Enterprise or Plus. The receiver has accepted `license_tier` since the v8 train (`omitempty`, normalised server-side) — only the clients never populated it.
+- **Read from the `/health` probe that already runs, so no new request is made.** `scripts/telemetry-ping.sh` already fetched `/health` once per heartbeat to detect `platform_version`; the response body is now captured once and both fields are read from it. The probe is unchanged in count, timeout and headers, and a test pins it at exactly one `GET /health` per heartbeat.
+- **Relayed verbatim, never interpreted.** The plugin does not normalise, case-fold, or map the value. The receiver owns the canonical mapping, so a tier issued after this plugin shipped still buckets correctly server-side instead of being flattened by a client that predates it. The lowercase `community` a community-mode build defaults to, and the transient `starting` an agent reports before initialisation completes, are both real answers and are relayed as such.
+- **Three dimensions that sound alike are kept apart.** `license_tier` is what the platform says its licence is; `deployment_mode` is where this plugin is pointed, classified locally from the endpoint host; `endpoint_type` is that endpoint's network reachability. A `self_hosted` endpoint is routinely Enterprise-licensed and `community_saas` is a hosting topology rather than the Community tier, so none of the three may be derived from another. A test pins all three to different values in one payload.
+
+### Security
+
+- **Fails open in every direction, and the field is omitted rather than guessed.** An unreachable endpoint, a 4xx or 5xx, a malformed or non-object body, an answer slower than the 2s probe budget, or a `tier` that is absent, blank or not a string all leave the heartbeat delivered, the exit code 0, both streams silent, and the key **absent** — not `"unknown"`, not `null`, not `""`. Omission is the wire's existing "this client did not report" signal; sending `"unknown"` would instead assert that the platform answered and said it did not know.
+- The `/health` probe now uses `curl --fail`, so a non-2xx response contributes neither `license_tier` nor `platform_version` instead of having its error body parsed for one. This matches the openclaw plugin's existing `if (!resp.ok) return null`.
+- An endpoint-supplied `tier` longer than 64 characters is dropped whole rather than truncated — the longest canonical value is 14 characters, and a truncated value would be a tier the platform never reported.
+- Tests: `tests/telemetry-license-tier/` (30 assertions over the round-trip and fail-open matrix, driving the real `telemetry-ping.sh`), its mutation gate (seven planted defects that must each turn the matrix red, plus a neutral control that must survive), `runtime-e2e/license_tier_telemetry/` (adds a verbatim round-trip against a live agent's own reported tier), and a new leg in `tests/heartbeat-real-stack/` so the pre-existing hook-entry-point E2E covers the field too.
+
+### Changed
+
+- Telemetry disclosure in `README.md` now names the licence tier and states explicitly that no licence key, expiry, seat count, or customer name is read or sent. The same section's stale `deployment_mode` values (`self-hosted production` / `self-hosted development`, retired in the v1 telemetry schema) were corrected to the values actually sent, and the source-tree comment claiming the heartbeat "fires once per install" now states the real 7-day cadence.
+
 ## [1.11.0] - 2026-07-18 — caller_name audit attribution (dual-send with legacy tool_type)
 
 ### Changed

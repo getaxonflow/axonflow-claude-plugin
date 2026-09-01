@@ -13,7 +13,8 @@
 #     3. Bootstrap registers against the fake /api/v1/register and persists
 #        ~/.config/axonflow/try-registration.json (mode 0600).
 #     4. Telemetry heartbeat fires once (counter goes 0 → 1) with
-#        deployment_mode=community-saas.
+#        deployment_mode=community-saas, and carries license_tier relayed
+#        verbatim from the `tier` key of the /health response (#3619).
 #     5. Telemetry stamp file written (mode 0600).
 #
 #   Run 2 — WARM CACHE. Same sandbox HOME. Expectations:
@@ -215,6 +216,25 @@ if [ -f "$WORK_DIR/_pings.jsonl" ]; then
     fail "ping org_id is sentinel local-dev-org; expected the cs_<uuid> from registration"
   else
     fail "ping org_id=$COLD_ORG_ID (expected cs_<uuid> from registration, got registered=$REG_TENANT)"
+  fi
+  # #3619: license_tier is the licence tier the PLATFORM reports about itself,
+  # read from the `tier` key of the /health response the heartbeat already
+  # fetches. The fake answers "Professional" — deliberately not the value any
+  # client-side default would produce — so this cannot pass by coincidence.
+  # Relayed verbatim: the receiver owns the canonical mapping.
+  COLD_TIER=$(jq -r 'if has("license_tier") then (.license_tier | tostring) else "__ABSENT__" end' "$WORK_DIR/_pings.jsonl" | head -1)
+  if [ "$COLD_TIER" = "Professional" ]; then
+    pass "ping license_tier=Professional (relayed verbatim from /health tier)"
+  else
+    fail "ping license_tier=$COLD_TIER (expected Professional from the /health tier key)"
+  fi
+  # license_tier must not be conflated with deployment_mode: this run reports
+  # a Professional-licensed platform reached over loopback, which the v1
+  # classifier calls self_hosted. Two different dimensions, two values.
+  if [ "$COLD_TIER" != "$COLD_MODE" ]; then
+    pass "license_tier ($COLD_TIER) and deployment_mode ($COLD_MODE) are independent dimensions"
+  else
+    fail "license_tier and deployment_mode both read $COLD_TIER — the two dimensions are being conflated"
   fi
 fi
 

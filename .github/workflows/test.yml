@@ -37,6 +37,7 @@ jobs:
           bash -n scripts/user-identity.sh
           bash -n scripts/user-token.sh
           bash -n scripts/mcp-auth-headers.sh
+          bash -n scripts/telemetry-ping.sh
 
       - name: Run hook regression tests (mock server)
         run: |
@@ -82,6 +83,19 @@ jobs:
         run: |
           chmod +x tests/test-user-token-header-wire.sh
           ./tests/test-user-token-header-wire.sh
+
+      # #3619. Two steps on purpose: the matrix asserts the behaviour, the gate
+      # asserts the matrix can actually go red. A green matrix alone would not
+      # distinguish "the field works" from "nothing is being read off the wire".
+      - name: "Run license_tier heartbeat matrix (round-trip + fail-open, #3619)"
+        run: |
+          chmod +x tests/telemetry-license-tier/run.sh tests/telemetry-license-tier/health_server.py
+          ./tests/telemetry-license-tier/run.sh
+
+      - name: "Run license_tier mutation gate (the matrix must be able to fail, #3619)"
+        run: |
+          chmod +x tests/telemetry-license-tier/mutation_gate.sh
+          ./tests/telemetry-license-tier/mutation_gate.sh
 
       - name: Validate plugin structure
         run: |
