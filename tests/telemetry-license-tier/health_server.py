@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""
+Scriptable /health responder + ping receiver for the license_tier matrix.
+
+One process serves both halves of the heartbeat's world so a single run of the
+real `scripts/telemetry-ping.sh` can be observed end to end:
+
+  GET  /health    -> whatever the current scenario file says to answer with
+  POST /v1/ping   -> appended verbatim to <work>/_pings.jsonl
+
+The scenario is read from <work>/_scenario.json on EVERY /health request, so
+the harness rewrites that one file between cases instead of restarting a
+server per case. Its shape:
+
+    {"status": 200, "body": "<raw bytes to write>", "delay": 0.0,
+     "content_type": "application/json"}
+
+`body` is written as raw bytes with no re-encoding, which is what lets the
+matrix cover malformed JSON, a JSON array, a bare string, and an empty body —
+cases a dict-shaped fixture could not express.
+
+Run:
+    python3 health_server.py <port> <work_dir>
+
+Readiness is signalled by creating <work>/_server_ready.
+"""
+
+import sys
+
+print(f"server starting (python {sys.version_info.major}.{sys.version_info.minor})", flush=True)
+
+import http.server
+import json
+import os
+import socketserver
+import threading
+import time
+
+print("server modules imported", flush=True)
+
+DEFAULT_SCENARIO = {
+    "status": 200,
+    "body": '{"status":"healthy","version":"10.3.0-harness","tier":"Enterprise"}',
+    "delay": 0.0,
+    "content_type": "application/json",
+}
+
+
+def make_handler(work_dir):
+    scenario_path = os.path.join(work_dir, "_scenario.json")
+    pings_path = os.path.join(work_dir, "_pings.jsonl")
+    health_hits_path = os.path.join(work_dir, "_health_hits")
+
+    def load_scenario():
+        try:
+            with open(scenario_path) as fh:
+                loaded = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return dict(DEFAULT_SCENARIO)
+        scenario = dict(DEFAULT_SCENARIO)
+        scenario.update(loaded)
+        return scenario
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        # Keep harness output readable; assertions read the files, not stderr.
+        def log_message(self, *_args, **_kwargs):
+            return
+
+        def do_GET(self):
+            if self.path != "/health":
+                self.send_response(404)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            scenario = load_scenario()
+
+            # Count every /health hit. The "exactly one probe per ping" check
+            # is what proves license_tier did not smuggle in a second request.
+            try:
+                with open(health_hits_path, "r+") as fh:
+                    n = int(fh.read().strip() or "0") + 1
+                    fh.seek(0)
+                    fh.write(str(n))
+                    fh.truncate()
+            except OSError:
+                pass
+
+            delay = float(scenario.get("delay") or 0.0)
+            if delay > 0:
+                time.sleep(delay)
+
+            payload = str(scenario.get("body") or "").encode("utf-8")
+            self.send_response(int(scenario.get("status") or 200))
+            self.send_header("Content-Type", scenario.get("content_type") or "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            try:
+                self.wfile.write(payload)
+            except BrokenPipeError:
+                # curl --max-time already walked away. That IS the slow case.
+                pass
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length else b""
+
+            if self.path == "/v1/ping":
+                # Store the body verbatim. Re-encoding through json would hide
+                # exactly the thing under test: whether the key is ABSENT or
+                # merely null/empty.
+                with open(pings_path, "ab") as fh:
+                    fh.write(raw.replace(b"\n", b" ") + b"\n")
+                body = b'{"ok":true}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    return Handler
+
+
+def main():
+    if len(sys.argv) != 3:
+        print("usage: health_server.py <port> <work_dir>", file=sys.stderr)
+        sys.exit(2)
+    port = int(sys.argv[1])
+    work_dir = sys.argv[2]
+    os.makedirs(work_dir, exist_ok=True)
+
+    for name, initial in (("_health_hits", "0"),):
+        path = os.path.join(work_dir, name)
+        if not os.path.exists(path):
+            with open(path, "w") as fh:
+                fh.write(initial)
+
+    handler = make_handler(work_dir)
+
+    # Threading matters: the slow-/health case holds one connection open past
+    # curl's timeout, and a single-threaded server would wedge every later
+    # request behind it.
+    class FastThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+        daemon_threads = True
+
+        def server_bind(self):
+            # Skip socket.getfqdn() — it blocks 30s+ on some macOS runners
+            # resolving 127.0.0.1 against an mDNS responder that never answers.
+            socketserver.TCPServer.server_bind(self)
+            host, self.server_port = self.server_address[:2]
+            self.server_name = host
+
+    server = FastThreadingHTTPServer(("127.0.0.1", port), handler)
+    server.allow_reuse_address = True
+
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+
+    ready_file = os.path.join(work_dir, "_server_ready")
+    with open(ready_file, "w") as fh:
+        fh.write("ready\n")
+        fh.flush()
+        try:
+            os.fsync(fh.fileno())
+        except OSError:
+            pass
+    try:
+        sys.stdout.write("server ready\n")
+        sys.stdout.flush()
+    except Exception:
+        pass
+
+    while True:
+        try:
+            time.sleep(3600)
+        except KeyboardInterrupt:
+            break
+    server.shutdown()
+
+
+if __name__ == "__main__":
+    main()
