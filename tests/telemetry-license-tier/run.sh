@@ -135,7 +135,10 @@ run_case() {
   # new field displaced something the receiver already depends on.
   local missing=""
   local f
-  for f in telemetry_type sdk sdk_version os arch runtime_version \
+  # platform_version is in this list deliberately: it is read from the same
+  # /health body and must ALWAYS be present (JSON null when unknown), so a
+  # regression that omitted the key instead is caught here on every case.
+  for f in telemetry_type sdk sdk_version platform_version os arch runtime_version \
            deployment_mode endpoint_type features instance_id org_id; do
     if ! printf '%s' "$CASE_PING" | jq -e "has(\"$f\")" >/dev/null 2>&1; then
       missing="$missing $f"
@@ -146,16 +149,25 @@ run_case() {
   fi
 }
 
-# tier_of prints the license_tier of the captured ping, or the sentinel
-# __ABSENT__ when the key is not present at all. The distinction between
-# absent, null and "" is the entire point, so it is never collapsed.
-tier_of() {
-  printf '%s' "$CASE_PING" | jq -r 'if has("license_tier") then (.license_tier | tostring) else "__ABSENT__" end' 2>/dev/null
+# Presence is asked of jq directly rather than encoded into a sentinel string.
+# A sentinel would be a value the SERVER can also send: a /health answering
+# `"tier":"__ABSENT__"` would have made a present key indistinguishable from a
+# missing one, in the one helper whose whole job is telling those apart.
+tier_present() {
+  printf '%s' "$CASE_PING" | jq -e 'has("license_tier")' >/dev/null 2>&1
+}
+
+tier_value() {
+  printf '%s' "$CASE_PING" | jq -r '.license_tier | tostring' 2>/dev/null
 }
 
 expect_tier() {
   local label="$1" want="$2" got
-  got=$(tier_of)
+  if ! tier_present; then
+    fail "[$label] license_tier key is ABSENT, expected $(printf '%q' "$want")"
+    return
+  fi
+  got=$(tier_value)
   if [ "$got" = "$want" ]; then
     pass "[$label] license_tier relayed verbatim as $(printf '%q' "$want")"
   else
@@ -164,12 +176,11 @@ expect_tier() {
 }
 
 expect_absent() {
-  local label="$1" got
-  got=$(tier_of)
-  if [ "$got" = "__ABSENT__" ]; then
+  local label="$1"
+  if ! tier_present; then
     pass "[$label] license_tier key absent (not \"unknown\", not null, not \"\")"
   else
-    fail "[$label] license_tier is $(printf '%q' "$got"), expected the key to be ABSENT"
+    fail "[$label] license_tier is $(printf '%q' "$(tier_value)"), expected the key to be ABSENT"
   fi
 }
 
@@ -211,7 +222,7 @@ echo "--- The three dimensions must disagree, and be reported separately ---"
 # self_hosted. Conflating any pair would collapse two of these values.
 run_case "three-way distinction" "$LIVE_ENDPOINT" \
   "$(health_body '{"status":"healthy","version":"10.3.0","tier":"Enterprise"}')"
-THREE_LT=$(tier_of)
+THREE_LT=$(tier_value)
 THREE_DM=$(printf '%s' "$CASE_PING" | jq -r '.deployment_mode')
 THREE_ET=$(printf '%s' "$CASE_PING" | jq -r '.endpoint_type')
 if [ "$THREE_LT" = "Enterprise" ] && [ "$THREE_DM" = "self_hosted" ] && [ "$THREE_ET" = "localhost" ]; then
