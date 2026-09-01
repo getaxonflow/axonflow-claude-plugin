@@ -170,6 +170,14 @@ expect_mutant survives "equivalent rewrite of the omission test (control)" \
   'if $license_tier == "" then {} else' \
   'if ($license_tier | length) == 0 then {} else'
 
+# M8 — the platform_version JSON splice restored. A version containing a
+# double quote then yields invalid JSON, jq -n fails, PAYLOAD is empty and the
+# script exits having sent NO heartbeat. This is the pre-existing defect the
+# rewrite removed; the mutant proves the matrix now catches it.
+expect_mutant killed "platform_version JSON splice restored" \
+  '  --arg platform_version "$PLATFORM_VERSION" \' \
+  '  --argjson platform_version "$(if [ -z "$PLATFORM_VERSION" ]; then printf null; else printf %s "\"$PLATFORM_VERSION\""; fi)" \'
+
 # C2 — control, and a claim about the source kept honest. Dropping the
 # `type == "object"` half of the extraction guard changes no observable
 # outcome: jq errors when asked for `.tier` of an array, string or number, the

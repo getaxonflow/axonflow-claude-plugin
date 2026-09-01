@@ -304,6 +304,45 @@ run_case "slow /health (past the 2s probe budget)" "$LIVE_ENDPOINT" \
 expect_absent "slow /health (past the 2s probe budget)"
 
 echo ""
+echo "--- A successful probe must never be able to destroy the heartbeat ---"
+
+# Regression: platform_version used to be spliced into the payload by hand-
+# building a JSON string around it. A version CONTAINING a double quote or a
+# backslash produced invalid JSON, jq -n failed, and the script exited having
+# sent NO ping at all. A probe that answers must never be more dangerous than
+# one that does not, so these assert the heartbeat survives and both fields
+# arrive intact.
+run_case "version containing a double quote" "$LIVE_ENDPOINT" \
+  "$(health_body '{"status":"healthy","version":"10.3.0\"evil","tier":"Enterprise"}')"
+expect_tier "version containing a double quote" "Enterprise"
+QUOTE_PV=$(printf '%s' "$CASE_PING" | jq -r '.platform_version')
+if [ "$QUOTE_PV" = '10.3.0"evil' ]; then
+  pass "platform_version with an embedded quote survives, escaped by jq"
+else
+  fail "platform_version is $(printf '%q' "$QUOTE_PV"), expected 10.3.0\"evil"
+fi
+
+run_case "version containing a backslash" "$LIVE_ENDPOINT" \
+  "$(health_body '{"status":"healthy","version":"10.3.0\\x","tier":"Plus"}')"
+expect_tier "version containing a backslash" "Plus"
+BS_PV=$(printf '%s' "$CASE_PING" | jq -r '.platform_version')
+if [ "$BS_PV" = '10.3.0\x' ]; then
+  pass "platform_version with an embedded backslash survives, escaped by jq"
+else
+  fail "platform_version is $(printf '%q' "$BS_PV"), expected 10.3.0\\x"
+fi
+
+# The unknown case must still serialise as JSON null, not the string "null" and
+# not an omitted key - the receiver's existing contract for this field.
+run_case "version absent keeps platform_version JSON null" "$LIVE_ENDPOINT" \
+  "$(health_body '{"status":"healthy","tier":"Enterprise"}')"
+if printf '%s' "$CASE_PING" | jq -e 'has("platform_version") and .platform_version == null' >/dev/null 2>&1; then
+  pass "platform_version is JSON null when unknown (key present, value null)"
+else
+  fail "platform_version is $(printf '%s' "$CASE_PING" | jq -c '.platform_version // "__ABSENT__"'), expected JSON null"
+fi
+
+echo ""
 echo "========================================"
 echo " license_tier matrix — $(basename "$(dirname "$PING_SCRIPT")")/$(basename "$PING_SCRIPT")"
 echo "========================================"

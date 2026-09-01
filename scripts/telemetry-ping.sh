@@ -189,11 +189,19 @@ SDK_VERSION=$(jq -r '.version // "unknown"' "$PLUGIN_DIR/.claude-plugin/plugin.j
 HEALTH_BODY=$(curl -s --fail --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null || printf '')
 
 PLATFORM_VERSION=$(printf '%s' "$HEALTH_BODY" | jq -r 'if type == "object" then (.version // empty) else empty end' 2>/dev/null || printf '')
-if [ -z "$PLATFORM_VERSION" ] || [ "$PLATFORM_VERSION" = "null" ]; then
-  PLATFORM_VERSION="null"
-else
-  PLATFORM_VERSION="\"${PLATFORM_VERSION}\""
+# The literal string "null" is treated as unknown, preserving this field's
+# prior behaviour.
+if [ "$PLATFORM_VERSION" = "null" ]; then
+  PLATFORM_VERSION=""
 fi
+# NOTE: this used to hand-build the JSON by splicing quotes around the value
+# and passing it through --argjson. A /health answering with a version that
+# CONTAINED a double quote or backslash then produced invalid JSON, jq -n
+# failed, PAYLOAD came back empty, and the script exited 0 having sent NO
+# HEARTBEAT AT ALL - a successful probe silently destroying the ping it was
+# meant to enrich. It is now passed as a plain --arg and turned into
+# null-or-string inside the filter, so jq owns the escaping. The wire shape is
+# unchanged: JSON null when unknown, a JSON string otherwise.
 
 # license_tier — the licence tier the PLATFORM reports about ITSELF, read from
 # the `tier` key of the same /health response.
@@ -335,12 +343,12 @@ PAYLOAD=$(jq -n \
   --arg org_id "$ORG_ID_VALUE" \
   --arg license_tier "$LICENSE_TIER" \
   --argjson hook_count "$HOOK_COUNT" \
-  --argjson platform_version "$PLATFORM_VERSION" \
+  --arg platform_version "$PLATFORM_VERSION" \
   '{
     telemetry_type: $telemetry_type,
     sdk: $sdk,
     sdk_version: $sdk_version,
-    platform_version: $platform_version,
+    platform_version: (if $platform_version == "" then null else $platform_version end),
     os: $os,
     arch: $arch,
     runtime_version: $runtime_version,
