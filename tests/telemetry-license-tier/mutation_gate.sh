@@ -132,34 +132,34 @@ expect_mutant killed "omission replaced by a literal unknown" \
 # M3 — the string-type guard removed, so a numeric / boolean / structured
 # tier is coerced onto the wire as though the platform had reported it.
 expect_mutant killed "string-type guard removed" \
-  'if type == "object" and (.tier | type) == "string" then .tier else empty end' \
-  'if type == "object" then (.tier // empty) else empty end'
+  'if type == "object" and (.[$k] | type) == "string" then .[$k] else empty end' \
+  'if type == "object" then (.[$k] // empty) else empty end'
 
 # M4 — --fail dropped, so curl hands a 4xx/5xx error body to jq and a tier
 # inside it is reported as though it were an answer.
 expect_mutant killed "curl --fail dropped from the health probe" \
-  'curl -s --fail --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"' \
-  'curl -s --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"'
+  'curl -s --fail --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"' \
+  'curl -s --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"'
 
 # M5 — the length cap raised out of reach, so an endpoint-controlled string of
 # arbitrary size reaches the wire.
 expect_mutant killed "length cap raised out of reach" \
-  'if [ "${#LICENSE_TIER}" -gt 64 ]; then' \
-  'if [ "${#LICENSE_TIER}" -gt 100000 ]; then'
+  'if [ "${#value}" -gt 64 ]; then' \
+  'if [ "${#value}" -gt 100000 ]; then'
 
 # M6 — client-side normalization. The plugin must relay, not interpret: a
 # build that case-folds makes every tier it predates indistinguishable.
 expect_mutant killed "client-side normalization introduced" \
-  'if [ "${#LICENSE_TIER}" -gt 64 ]; then' \
-  'LICENSE_TIER=$(printf "%s" "$LICENSE_TIER" | tr "[:upper:]" "[:lower:]")
-if [ "${#LICENSE_TIER}" -gt 64 ]; then'
+  '  if [ "${#value}" -gt 64 ]; then' \
+  '  value=$(printf "%s" "$value" | tr "[:upper:]" "[:lower:]")
+  if [ "${#value}" -gt 64 ]; then'
 
 # M7 — a second /health request. The field would then be a new data
 # collection rather than a new field on an existing probe.
 expect_mutant killed "second /health request introduced" \
-  'LICENSE_TIER=$(printf '"'"'%s'"'"' "$HEALTH_BODY" |' \
+  'LICENSE_TIER=$(relayed_health_value tier)' \
   'HEALTH_BODY=$(curl -s --fail --max-time 2 "${ENDPOINT}/health" 2>/dev/null || printf '"'"''"'"')
-LICENSE_TIER=$(printf '"'"'%s'"'"' "$HEALTH_BODY" |'
+LICENSE_TIER=$(relayed_health_value tier)'
 
 # M0 — the survivor, and it is planted at the EXACT site the other mutants
 # attack: an equivalent rewrite of the emptiness test on the payload merge.
@@ -185,8 +185,50 @@ expect_mutant killed "platform_version JSON splice restored" \
 # earns its keep is the STRING check, which M3 above kills. If this control
 # ever starts being killed, the object check has become load-bearing.
 expect_mutant survives "object-type half of the extraction guard removed (control)" \
-  'if type == "object" and (.tier | type) == "string" then .tier else empty end' \
-  'if (.tier | type) == "string" then .tier else empty end'
+  'if type == "object" and (.[$k] | type) == "string" then .[$k] else empty end' \
+  'if (.[$k] | type) == "string" then .[$k] else empty end'
+
+# ---------------------------------------------------------------------------
+# The relays added for enterprise#3662, and the two redirect properties.
+# ---------------------------------------------------------------------------
+
+# N1/N2 — each new field never attached. Their round-trip cases must go red.
+expect_mutant killed "edition never sent" \
+  '  + (if $edition == "" then {} else { edition: $edition } end)' \
+  '  + {}'
+
+expect_mutant killed "platform_deployment_mode never sent" \
+  '  + (if $platform_deployment_mode == "" then {} else { platform_deployment_mode: $platform_deployment_mode } end)' \
+  '  + {}'
+
+# N3 — THE dangerous one. The platform's own deployment mode written over this
+# plugin's local classification. The wire stays valid and the value looks
+# entirely plausible; what breaks is every existing deployment_mode figure.
+# Only a fixture where the two DISAGREE can catch it.
+expect_mutant killed "platform mode written over the local classification" \
+  '    deployment_mode: $deployment_mode,' \
+  '    deployment_mode: (if $platform_deployment_mode == "" then $deployment_mode else $platform_deployment_mode end),'
+
+# N4 — the delivery test reverted to what it was: `--fail` alone, which exits 0
+# on a 3xx. The stamp then advances on a ping the receiver never processed and
+# the machine goes dark for seven days. This is the defect this change fixes,
+# so the matrix must be able to see it.
+expect_mutant killed "any non-error response counts as delivery" \
+  'case "$PING_HTTP_CODE" in
+  2??)' \
+  'case "$PING_HTTP_CODE" in
+  ???)'
+
+# N5/N6 — redirect following restored, one leg at a time. On /health the probe
+# would read its values from a host the caller never configured; on the POST a
+# redirect becomes a bodyless GET whose 200 reads as delivery.
+expect_mutant killed "redirect following restored on the /health probe" \
+  'curl -s --fail --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"' \
+  'curl -s --fail -L --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"'
+
+expect_mutant killed "redirect following restored on the checkpoint POST" \
+  "curl -s -o /dev/null -w '%{http_code}' --max-redirs 0 --max-time 3 -X POST" \
+  "curl -s -o /dev/null -w '%{http_code}' -L --max-time 3 -X POST"
 
 echo ""
 echo "--- Tree cleanliness ---"
@@ -199,7 +241,7 @@ fi
 
 echo ""
 echo "========================================"
-echo " license_tier mutation gate"
+echo " telemetry relay mutation gate"
 echo "========================================"
 echo "Passed: $PASSED"
 echo "Failed: $FAILED"

@@ -87,9 +87,16 @@ CASE_RC=0
 CASE_OUT=""
 CASE_ERR=""
 CASE_HEALTH_HITS=0
+CASE_STAMPED=0
+CASE_REDIRECT_TARGET_HITS=""
 
+# run_case <label> <health-endpoint> <scenario-json> [expect_ping]
+#
+# expect_ping defaults to 1. Pass 0 for the cases where NOT delivering is the
+# correct outcome under test (a redirected checkpoint), so the absence of a
+# ping is read as the result rather than as a harness failure.
 run_case() {
-  local label="$1" health_endpoint="$2" scenario="$3"
+  local label="$1" health_endpoint="$2" scenario="$3" expect_ping="${4:-1}"
 
   printf '%s' "$scenario" > "$WORK_DIR/_scenario.json"
   : > "$WORK_DIR/_pings.jsonl"
@@ -112,6 +119,15 @@ run_case() {
   CASE_ERR=$(cat "$WORK_DIR/_stderr" 2>/dev/null)
   CASE_PING=$(head -1 "$WORK_DIR/_pings.jsonl" 2>/dev/null)
   CASE_HEALTH_HITS=$(cat "$WORK_DIR/_health_hits" 2>/dev/null || echo 0)
+  CASE_REDIRECT_TARGET_HITS=$(cat "$WORK_DIR/_redirect_target_hits" 2>/dev/null || printf '')
+
+  # Did the 7-day stamp advance? Found by glob, never by name: the stamp file
+  # is named after the plugin and this harness is byte-identical across the
+  # three repos that share it.
+  CASE_STAMPED=0
+  if compgen -G "$sandbox_home/.cache/axonflow/*-telemetry-sent" >/dev/null 2>&1; then
+    CASE_STAMPED=1
+  fi
 
   # ---- invariants asserted on EVERY case, not only the failure ones -------
   if [ "$CASE_RC" -ne 0 ]; then
@@ -122,6 +138,11 @@ run_case() {
   fi
   if [ -n "$CASE_ERR" ]; then
     fail "[$label] wrote to stderr: $CASE_ERR"
+  fi
+  if [ "$expect_ping" = "0" ]; then
+    # The caller is testing a non-delivery. Everything below asserts on the
+    # payload, so there is nothing further to check here.
+    return
   fi
   if [ -z "$CASE_PING" ]; then
     fail "[$label] no heartbeat delivered — enrichment must never suppress the ping"
@@ -153,36 +174,43 @@ run_case() {
 # A sentinel would be a value the SERVER can also send: a /health answering
 # `"tier":"__ABSENT__"` would have made a present key indistinguishable from a
 # missing one, in the one helper whose whole job is telling those apart.
-tier_present() {
-  printf '%s' "$CASE_PING" | jq -e 'has("license_tier")' >/dev/null 2>&1
+field_present() {
+  printf '%s' "$CASE_PING" | jq -e --arg k "$1" 'has($k)' >/dev/null 2>&1
 }
 
-tier_value() {
-  printf '%s' "$CASE_PING" | jq -r '.license_tier | tostring' 2>/dev/null
+field_value() {
+  printf '%s' "$CASE_PING" | jq -r --arg k "$1" '.[$k] | tostring' 2>/dev/null
 }
 
-expect_tier() {
-  local label="$1" want="$2" got
-  if ! tier_present; then
-    fail "[$label] license_tier key is ABSENT, expected $(printf '%q' "$want")"
+expect_field() {
+  local label="$1" key="$2" want="$3" got
+  if ! field_present "$key"; then
+    fail "[$label] $key key is ABSENT, expected $(printf '%q' "$want")"
     return
   fi
-  got=$(tier_value)
+  got=$(field_value "$key")
   if [ "$got" = "$want" ]; then
-    pass "[$label] license_tier relayed verbatim as $(printf '%q' "$want")"
+    pass "[$label] $key relayed verbatim as $(printf '%q' "$want")"
   else
-    fail "[$label] license_tier is $(printf '%q' "$got"), expected $(printf '%q' "$want")"
+    fail "[$label] $key is $(printf '%q' "$got"), expected $(printf '%q' "$want")"
   fi
 }
 
-expect_absent() {
-  local label="$1"
-  if ! tier_present; then
-    pass "[$label] license_tier key absent (not \"unknown\", not null, not \"\")"
+expect_field_absent() {
+  local label="$1" key="$2"
+  if ! field_present "$key"; then
+    pass "[$label] $key key absent (not \"unknown\", not null, not \"\")"
   else
-    fail "[$label] license_tier is $(printf '%q' "$(tier_value)"), expected the key to be ABSENT"
+    fail "[$label] $key is $(printf '%q' "$(field_value "$key")"), expected the key to be ABSENT"
   fi
 }
+
+# license_tier keeps its own names: it has the most call sites below, and the
+# wrappers keep this change to the matrix rather than to every existing case.
+tier_present() { field_present license_tier; }
+tier_value() { field_value license_tier; }
+expect_tier() { expect_field "$1" license_tier "$2"; }
+expect_absent() { expect_field_absent "$1" license_tier; }
 
 health_body() { printf '{"status":200,"body":%s}' "$(jq -Rn --arg b "$1" '$b')"; }
 
@@ -354,8 +382,160 @@ else
 fi
 
 echo ""
+echo "--- edition and platform_deployment_mode relay on the same terms ---"
+
+# Round-trip. These are the two members enterprise#3662 adds to /health; the
+# values are relayed verbatim, exactly as license_tier is.
+for ed in community enterprise Enterprise starting SomethingThisBuildNeverHeardOf; do
+  run_case "edition=$ed" "$LIVE_ENDPOINT" \
+    "$(health_body "{\"version\":\"10.4.0\",\"tier\":\"Enterprise\",\"edition\":\"$ed\"}")"
+  expect_field "edition=$ed" edition "$ed"
+done
+
+for pdm in self_hosted community_saas kubernetes docker_compose unknown; do
+  run_case "platform_deployment_mode=$pdm" "$LIVE_ENDPOINT" \
+    "$(health_body "{\"version\":\"10.4.0\",\"tier\":\"Enterprise\",\"deployment_mode\":\"$pdm\"}")"
+  expect_field "platform_deployment_mode=$pdm" platform_deployment_mode "$pdm"
+done
+
+# THE case that makes the relay meaningful rather than merely present. The
+# platform reports community_saas about ITSELF while this plugin classifies the
+# endpoint it was pointed at as self_hosted. A fixture where the two agree
+# cannot tell a correct relay from one that wrote the platform's answer over
+# the plugin's own field - and that mistake corrupts every existing
+# deployment-mode figure rather than losing a dimension.
+run_case "platform mode differs from local classification" "$LIVE_ENDPOINT" \
+  "$(health_body '{"version":"10.4.0","tier":"Enterprise","edition":"enterprise","deployment_mode":"community_saas"}')"
+expect_field "platform mode differs" platform_deployment_mode "community_saas"
+expect_field "platform mode differs" deployment_mode "self_hosted"
+if [ "$(field_value deployment_mode)" != "$(field_value platform_deployment_mode)" ]; then
+  pass "deployment_mode (self_hosted, local) and platform_deployment_mode (community_saas, reported) stayed distinct"
+else
+  fail "the platform's deployment mode was written over this plugin's own classification"
+fi
+
+# All four relays ride ONE probe. A second request would make these new data
+# collection rather than new fields on a probe that already happened.
+if [ "$CASE_HEALTH_HITS" = "1" ]; then
+  pass "exactly one GET /health for all four relayed fields"
+else
+  fail "GET /health hit $CASE_HEALTH_HITS times (expected exactly 1)"
+fi
+
+echo ""
+echo "--- Fail open applies to the new fields identically ---"
+
+# An older platform - every released platform today, in fact - simply has no
+# such members. Absent, never defaulted.
+run_case "edition + mode absent (platform predates #3662)" "$LIVE_ENDPOINT" \
+  "$(health_body '{"status":"healthy","version":"10.3.0","tier":"Enterprise"}')"
+expect_field_absent "edition absent" edition
+expect_field_absent "mode absent" platform_deployment_mode
+expect_tier "tier still relayed alongside" "Enterprise"
+
+for bad in 'null' '42' 'true' '{"a":1}' '["x"]' '""'; do
+  run_case "edition: $bad" "$LIVE_ENDPOINT" \
+    "$(health_body "{\"version\":\"10.4.0\",\"edition\":$bad}")"
+  expect_field_absent "edition: $bad" edition
+done
+
+for bad in 'null' '42' 'true' '{"a":1}' '["x"]' '""'; do
+  run_case "deployment_mode: $bad" "$LIVE_ENDPOINT" \
+    "$(health_body "{\"version\":\"10.4.0\",\"deployment_mode\":$bad}")"
+  expect_field_absent "deployment_mode: $bad" platform_deployment_mode
+done
+
+# Over the cap: dropped whole, never truncated, and never at the cost of the
+# fields that were fine.
+ED65=$(printf 'E%.0s' $(seq 1 65))
+run_case "edition one past the 64-char cap" "$LIVE_ENDPOINT" \
+  "$(health_body "{\"version\":\"10.4.0\",\"tier\":\"Enterprise\",\"edition\":\"$ED65\"}")"
+expect_field_absent "edition one past the cap" edition
+expect_tier "an over-long edition does not cost the tier" "Enterprise"
+
+ED64=$(printf 'E%.0s' $(seq 1 64))
+run_case "edition at the 64-char cap" "$LIVE_ENDPOINT" \
+  "$(health_body "{\"version\":\"10.4.0\",\"edition\":\"$ED64\"}")"
+expect_field "edition at the cap" edition "$ED64"
+
+# A 10 KB value is the shape that matters: uncapped, it would push the ping
+# past the receiver's 64 KiB body limit and cost every other dimension.
+BIG=$(printf 'T%.0s' $(seq 1 10240))
+run_case "10 KB deployment_mode" "$LIVE_ENDPOINT" \
+  "$(health_body "{\"version\":\"10.4.0\",\"tier\":\"Enterprise\",\"deployment_mode\":\"$BIG\"}")"
+expect_field_absent "10 KB deployment_mode" platform_deployment_mode
+expect_tier "a 10 KB value does not cost the tier" "Enterprise"
+PING_BYTES=${#CASE_PING}
+if [ "$PING_BYTES" -lt 65536 ]; then
+  pass "ping stayed at $PING_BYTES bytes, inside the receiver's 64 KiB limit"
+else
+  fail "ping is $PING_BYTES bytes, at or over the receiver's 64 KiB limit"
+fi
+
+# Hostile but VALID values. The dangerous case is a probe that SUCCEEDS: these
+# must be escaped by jq as values, not spliced into the payload.
+run_case "edition containing a quote and a backslash" "$LIVE_ENDPOINT" \
+  "$(health_body '{"version":"10.4.0","edition":"ent\"erp\\rise","tier":"Plus"}')"
+expect_field "edition with quote+backslash" edition 'ent"erp\rise'
+expect_tier "hostile edition does not cost the tier" "Plus"
+
+run_case "deployment_mode containing a newline" "$LIVE_ENDPOINT" \
+  "$(health_body '{"version":"10.4.0","deployment_mode":"self\nhosted","tier":"Plus"}')"
+expect_field "mode with newline" platform_deployment_mode "$(printf 'self\nhosted')"
+
+echo ""
+echo "--- Redirects are not followed, on either leg ---"
+
+# A /health that redirects. curl does not follow (no -L), so nothing is
+# learned - and, crucially, the redirect TARGET is never contacted. The target
+# serves values a relay would happily forward, so finding them on the wire
+# would mean the probe read from a host the caller never configured.
+run_case "/health redirects elsewhere" "$LIVE_ENDPOINT" \
+  "$(printf '{"status":302,"location":"%s/elsewhere","body":""}' "$LIVE_ENDPOINT")"
+expect_absent "/health redirects elsewhere"
+expect_field_absent "/health redirects elsewhere" edition
+expect_field_absent "/health redirects elsewhere" platform_deployment_mode
+if [ -z "$CASE_REDIRECT_TARGET_HITS" ]; then
+  pass "the redirect target was never contacted"
+else
+  fail "the probe followed a redirect: $CASE_REDIRECT_TARGET_HITS"
+fi
+
+# THE stamp case. A checkpoint URL answering 302 is not a delivery: curl does
+# not follow it, so the receiver never sees the payload. `--fail` alone would
+# exit 0 here (it fails on >= 400 only) and the 7-day stamp would advance on a
+# ping that was never sent, taking this machine dark for a week.
+run_case "checkpoint POST redirects" "$LIVE_ENDPOINT" \
+  "$(printf '{"status":200,"body":"{\\"version\\":\\"10.4.0\\",\\"tier\\":\\"Enterprise\\"}","ping_status":302,"ping_location":"%s/sink"}' "$LIVE_ENDPOINT")" 0
+if [ -z "$CASE_PING" ]; then
+  pass "a redirected checkpoint POST delivered no ping (as expected)"
+else
+  fail "a ping was recorded despite the redirect: $CASE_PING"
+fi
+if [ "$CASE_STAMPED" = "0" ]; then
+  pass "the 7-day stamp did NOT advance on a redirected checkpoint POST"
+else
+  fail "the stamp advanced on a ping the receiver never processed — this machine would go dark for 7 days"
+fi
+if [ -z "$CASE_REDIRECT_TARGET_HITS" ]; then
+  pass "the checkpoint redirect target was never contacted"
+else
+  fail "the POST followed a redirect: $CASE_REDIRECT_TARGET_HITS"
+fi
+
+# The positive control for the two above: an ordinary 200 DOES stamp. Without
+# it, a script that never stamped at all would pass both assertions.
+run_case "ordinary delivery stamps" "$LIVE_ENDPOINT" \
+  "$(health_body '{"version":"10.4.0","tier":"Enterprise"}')"
+if [ "$CASE_STAMPED" = "1" ]; then
+  pass "a delivered ping DOES advance the stamp (control)"
+else
+  fail "the stamp did not advance on a successful delivery — the redirect assertions above prove nothing"
+fi
+
+echo ""
 echo "========================================"
-echo " license_tier matrix — $(basename "$(dirname "$PING_SCRIPT")")/$(basename "$PING_SCRIPT")"
+echo " relay matrix — $(basename "$(dirname "$PING_SCRIPT")")/$(basename "$PING_SCRIPT")"
 echo "========================================"
 echo "Passed: $PASSED"
 echo "Failed: $FAILED"

@@ -186,11 +186,57 @@ SDK_VERSION=$(jq -r '.version // "unknown"' "$PLUGIN_DIR/.claude-plugin/plugin.j
 # diagnostic. jq already buffered the same document to parse it, the endpoint
 # is the user's own configured agent, and the only part that reaches the wire
 # is the tier string, which IS length-capped below.
-HEALTH_BODY=$(curl -s --fail --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null || printf '')
+# --max-redirs 0 PINS a property this call already had. Without -L curl does
+# not follow a redirect at all, so a 3xx yields an empty body here and nothing
+# is learned - which is correct. But nothing asserted it, and adding -L later
+# would silently make the relayed values come from whatever host the configured
+# endpoint chose to point at, breaking the disclosure that they are what YOUR
+# platform reported. sdk-rust#89 found exactly that in a client whose library
+# followed redirects by default.
+HEALTH_BODY=$(curl -s --fail --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null || printf '')
 
-PLATFORM_VERSION=$(printf '%s' "$HEALTH_BODY" | jq -r 'if type == "object" then (.version // empty) else empty end' 2>/dev/null || printf '')
+# ---------------------------------------------------------------------------
+# relayed_health_value <key>
+#
+# Read ONE member out of the captured /health body and decide whether it was
+# LEARNED. Every relayed dimension goes through this one function, so all of
+# them obey the same rule and a new one cannot arrive with weaker checks.
+#
+# Learned only when the member is present, is a JSON STRING, is non-empty, and
+# is at most 64 bytes. An absent key, a non-string value, an explicit "" and an
+# over-long string are all NOT LEARNED - the value comes back empty and the
+# caller omits the field rather than asserting something the platform did not
+# say.
+#
+# The length cap is not tidiness. A hostile or broken endpoint controls these
+# strings, and the checkpoint service rejects a request body over 64 KiB - so an
+# uncapped relay lets a /health response that SUCCEEDS destroy the ping it was
+# meant to enrich, taking every other dimension with it. The canonical values
+# are short (the longest tier is 14 characters). Over-long values are dropped
+# WHOLE, never truncated: a truncated string is a value the platform never
+# reported.
+#
+# The `type == "object"` half of the guard is defence in depth and deliberately
+# NOT load-bearing: jq already errors when asked to index an array, string or
+# number, the error is swallowed, and the result is the same empty value. The
+# STRING check is the half that earns its keep. The mutation gate plants the
+# object check's removal as a must-SURVIVE control, so if it ever becomes
+# observable the gate says so instead of this comment quietly going stale.
+relayed_health_value() {
+  local key="$1" value
+  value=$(printf '%s' "$HEALTH_BODY" | jq -r --arg k "$key" 'if type == "object" and (.[$k] | type) == "string" then .[$k] else empty end' 2>/dev/null || printf '')
+  if [ "${#value}" -gt 64 ]; then
+    value=""
+  fi
+  printf '%s' "$value"
+}
+
+PLATFORM_VERSION=$(relayed_health_value version)
 # The literal string "null" is treated as unknown, preserving this field's
-# prior behaviour.
+# prior behaviour. Kept only for this field: the relayed members added later
+# forward such a value verbatim, because for them "the platform said null" and
+# "the platform said nothing" are different claims and only omission means the
+# second.
 if [ "$PLATFORM_VERSION" = "null" ]; then
   PLATFORM_VERSION=""
 fi
@@ -243,14 +289,22 @@ fi
 # STRING check is the half that earns its keep. The mutation gate plants the
 # object check's removal as a must-SURVIVE control, so if it ever becomes
 # observable the gate says so instead of this comment quietly going stale.
-LICENSE_TIER=$(printf '%s' "$HEALTH_BODY" | jq -r 'if type == "object" and (.tier | type) == "string" then .tier else empty end' 2>/dev/null || printf '')
-# A hostile or broken endpoint controls this string. The canonical set is
-# short ("EnterprisePlus" is the longest at 14 characters), so anything past
-# 64 is not a tier: drop it rather than ship it, and drop rather than truncate
-# — a truncated value would be a tier the platform never actually reported.
-if [ "${#LICENSE_TIER}" -gt 64 ]; then
-  LICENSE_TIER=""
-fi
+LICENSE_TIER=$(relayed_health_value tier)
+
+# edition and platform_deployment_mode - the two members axonflow-enterprise
+# #3662 adds to /health, relayed on exactly the terms license_tier already is:
+# same single response, verbatim, omitted when not learned. Every platform
+# released today omits them, and that is the same "not learned" case, so this
+# is correct before and after that change lands.
+#
+# platform_deployment_mode is the PLATFORM'S OWN deployment mode. It must never
+# be written onto the ping's `deployment_mode`, which is this plugin's local
+# classification of the endpoint it was pointed at (see the three-dimensions
+# note above). The two share a vocabulary and answer different questions;
+# collapsing them would corrupt every existing deployment-mode figure rather
+# than merely losing a dimension.
+EDITION=$(relayed_health_value edition)
+PLATFORM_DEPLOYMENT_MODE=$(relayed_health_value deployment_mode)
 
 # v1 telemetry-schema (#2008) classifiers. deployment_mode is derived from
 # the configured endpoint host plus the AXONFLOW_TRY=1 explicit override;
@@ -342,6 +396,8 @@ PAYLOAD=$(jq -n \
   --arg instance_id "$INSTANCE_ID" \
   --arg org_id "$ORG_ID_VALUE" \
   --arg license_tier "$LICENSE_TIER" \
+  --arg edition "$EDITION" \
+  --arg platform_deployment_mode "$PLATFORM_DEPLOYMENT_MODE" \
   --argjson hook_count "$HOOK_COUNT" \
   --arg platform_version "$PLATFORM_VERSION" \
   '{
@@ -358,21 +414,39 @@ PAYLOAD=$(jq -n \
     instance_id: $instance_id,
     org_id: $org_id
   }
-  + (if $license_tier == "" then {} else { license_tier: $license_tier } end)' 2>/dev/null)
+  + (if $license_tier == "" then {} else { license_tier: $license_tier } end)
+  + (if $edition == "" then {} else { edition: $edition } end)
+  + (if $platform_deployment_mode == "" then {} else { platform_deployment_mode: $platform_deployment_mode } end)' 2>/dev/null)
 
 if [ -z "$PAYLOAD" ]; then
   exit 0
 fi
 
-# Step 7: fire the heartbeat. --fail makes curl exit non-zero on HTTP 4xx/5xx
-# so we know whether to advance the stamp. 3s timeout matches existing budget.
-if curl -s --fail --max-time 3 -X POST "$CHECKPOINT_URL" \
+# Step 7: fire the heartbeat, and advance the stamp ONLY on a 2xx.
+#
+# `--fail` is not sufficient on its own and this is not theoretical: it fails on
+# HTTP >= 400, so a 3xx exits ZERO. A checkpoint URL answering 302 would then
+# advance the 7-day stamp on a ping the receiver never processed, and this
+# machine would go dark for a week. curl does not follow the redirect (no -L),
+# so the body simply goes nowhere. Measured, not reasoned: `curl -s --fail`
+# against a 302 exits 0 while the redirect target is never contacted.
+#
+# --max-redirs 0 pins the no-following half, so a future -L cannot turn a
+# redirected POST into the bodyless GET that reads as success (sdk-rust#89).
+#
+# 000 is curl's own value when the request never produced a status at all
+# (connection refused, DNS failure, timeout), and it is not a delivery either.
+PING_HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-redirs 0 --max-time 3 -X POST "$CHECKPOINT_URL" \
   -H "Content-Type: application/json" \
-  -d "$PAYLOAD" >/dev/null 2>&1; then
-  # Step 8: stamp ONLY on delivery success. Atomic via temp+rename so a process
-  # crash mid-write doesn't leave a corrupt stamp readable by the next caller.
-  TMP="${STAMP_FILE}.tmp.$$"
-  (umask 077 && echo "$INSTANCE_ID" > "$TMP" 2>/dev/null) && mv -f "$TMP" "$STAMP_FILE" 2>/dev/null
-fi
+  -d "$PAYLOAD" 2>/dev/null)
+case "$PING_HTTP_CODE" in
+  2??)
+    # Step 8: stamp ONLY on delivery success. Atomic via temp+rename so a
+    # process crash mid-write doesn't leave a corrupt stamp readable by the
+    # next caller.
+    TMP="${STAMP_FILE}.tmp.$$"
+    (umask 077 && echo "$INSTANCE_ID" > "$TMP" 2>/dev/null) && mv -f "$TMP" "$STAMP_FILE" 2>/dev/null
+    ;;
+esac
 
 exit 0

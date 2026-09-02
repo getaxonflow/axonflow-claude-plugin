@@ -539,6 +539,10 @@ Anonymous heartbeat at most once every 7 days per machine: plugin version, OS, a
 
 The licence tier sent is whatever the platform reported about itself, relayed verbatim. The plugin does not normalise, map, or restrict the value, so a transient state such as `starting`, or a tier name introduced after this plugin shipped, reaches the wire unchanged rather than being flattened into a fixed list. What is never read or sent: **no licence key, no expiry date, no seat count, and no customer or organisation name**. It is read from the `tier` field of the `/health` response the heartbeat already fetches to detect the platform version, so it costs no additional request, and it is omitted entirely whenever that probe does not answer with one.
 
+Two further values are relayed on the same terms, from the same response: the platform's **edition** and the deployment mode the **platform reports about itself**. The second is deliberately separate from the `deployment_mode` above, which is this plugin's own classification of the endpoint it was pointed at — they answer different questions and routinely differ, so neither is written over the other. Both are omitted entirely whenever the platform does not report them, which is the case for every platform released before they existed. Any relayed value longer than 64 bytes is dropped whole rather than truncated, since a truncated value would be something the platform never said.
+
+The heartbeat does not follow HTTP redirects on either leg. A redirected `/health` teaches the plugin nothing rather than reading values from a host you did not configure, and a redirected checkpoint POST is not treated as a delivery — the 7-day stamp advances only on a 2xx, so a redirect cannot silence telemetry for a week on a ping that was never received.
+
 Opt out: set `AXONFLOW_TELEMETRY=off` in the environment Claude Code runs in.
 
 ### Scope of `AXONFLOW_TELEMETRY=off`
