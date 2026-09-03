@@ -131,28 +131,53 @@ expect_mutant killed "omission replaced by a literal unknown" \
 
 # M3 — the string-type guard removed, so a numeric / boolean / structured
 # tier is coerced onto the wire as though the platform had reported it.
-expect_mutant killed "string-type guard removed" \
-  'if type == "object" and (.[$k] | type) == "string" then .[$k] else empty end' \
-  'if type == "object" then (.[$k] // empty) else empty end'
+# The string guard is mutated by COERCION, not by deletion. Deleting it alone
+# is behaviour-preserving now: `utf8bytelength` errors on a non-string, the
+# error is swallowed, and the value is dropped anyway. Coercion is the actual
+# defect - a numeric or boolean `tier` reaching the wire as "42" or "true" as
+# though the platform had reported it - and it is what the type check exists to
+# prevent, so that is what the gate plants.
+expect_mutant killed "types coerced onto the wire instead of checked" \
+  'if type == "object" and (.[$k] | type) == "string" and (.[$k] | utf8bytelength) <= 64 and (.[$k] | index("\u0000")) == null then .[$k] else empty end' \
+  'if type == "object" and (.[$k] | tostring | utf8bytelength) <= 64 then (.[$k] | tostring) else empty end'
 
 # M4 — --fail dropped, so curl hands a 4xx/5xx error body to jq and a tier
 # inside it is reported as though it were an answer.
-expect_mutant killed "curl --fail dropped from the health probe" \
-  'curl -s --fail --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"' \
-  'curl -s --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"'
+expect_mutant killed "health probe accepts any non-error status" \
+  '  2??) HEALTH_BODY=$(printf '"'"'%s'"'"' "$HEALTH_RAW" | sed '"'"'$d'"'"') ;;' \
+  '  [23]??) HEALTH_BODY=$(printf '"'"'%s'"'"' "$HEALTH_RAW" | sed '"'"'$d'"'"') ;;'
+
+# The other side of the same boundary: accepting 4xx/5xx bodies, which is what
+# `--fail` used to prevent before the guard became an explicit status check.
+expect_mutant killed "health probe accepts error bodies" \
+  '  2??) HEALTH_BODY=$(printf '"'"'%s'"'"' "$HEALTH_RAW" | sed '"'"'$d'"'"') ;;' \
+  '  ???) HEALTH_BODY=$(printf '"'"'%s'"'"' "$HEALTH_RAW" | sed '"'"'$d'"'"') ;;'
 
 # M5 — the length cap raised out of reach, so an endpoint-controlled string of
 # arbitrary size reaches the wire.
 expect_mutant killed "length cap raised out of reach" \
-  'if [ "${#value}" -gt 64 ]; then' \
-  'if [ "${#value}" -gt 100000 ]; then'
+  '(.[$k] | utf8bytelength) <= 64' \
+  '(.[$k] | utf8bytelength) <= 100000'
+
+# The cap must be measured in BYTES. A character cap lets 64 multi-byte runes
+# through as up to 256 bytes, against a receiver limit measured in bytes.
+expect_mutant killed "cap measured in characters instead of bytes" \
+  '(.[$k] | utf8bytelength) <= 64' \
+  '(.[$k] | length) <= 64'
+
+# A NUL cannot survive a shell variable: it is dropped and bash warns on
+# stderr, which this script must never do.
+expect_mutant killed "NUL guard removed" \
+  'and (.[$k] | index("\u0000")) == null ' \
+  ''
 
 # M6 — client-side normalization. The plugin must relay, not interpret: a
 # build that case-folds makes every tier it predates indistinguishable.
 expect_mutant killed "client-side normalization introduced" \
-  '  if [ "${#value}" -gt 64 ]; then' \
-  '  value=$(printf "%s" "$value" | tr "[:upper:]" "[:lower:]")
-  if [ "${#value}" -gt 64 ]; then'
+  '  printf '"'"'%s'"'"' "$value"
+}' \
+  '  printf '"'"'%s'"'"' "$(printf "%s" "$value" | tr "[:upper:]" "[:lower:]")"
+}'
 
 # M7 — a second /health request. The field would then be a new data
 # collection rather than a new field on an existing probe.
@@ -185,8 +210,8 @@ expect_mutant killed "platform_version JSON splice restored" \
 # earns its keep is the STRING check, which M3 above kills. If this control
 # ever starts being killed, the object check has become load-bearing.
 expect_mutant survives "object-type half of the extraction guard removed (control)" \
-  'if type == "object" and (.[$k] | type) == "string" then .[$k] else empty end' \
-  'if (.[$k] | type) == "string" then .[$k] else empty end'
+  'if type == "object" and (.[$k] | type) == "string" and' \
+  'if (.[$k] | type) == "string" and'
 
 # ---------------------------------------------------------------------------
 # The relays added for enterprise#3662, and the two redirect properties.
@@ -219,12 +244,22 @@ expect_mutant killed "any non-error response counts as delivery" \
   'case "$PING_HTTP_CODE" in
   ???)'
 
+# The >= 400 half of the delivery guard. It used to live in `--fail`; moving it
+# into a pattern is where it can narrow SILENTLY, so the boundary is mutated
+# from both sides - a pattern that also admits 4xx and 5xx must be caught by
+# the rejected-ping cases, not only by the redirect one.
+expect_mutant killed "a rejected ping counts as delivery" \
+  'case "$PING_HTTP_CODE" in
+  2??)' \
+  'case "$PING_HTTP_CODE" in
+  [245]??)'
+
 # N5/N6 — redirect following restored, one leg at a time. On /health the probe
 # would read its values from a host the caller never configured; on the POST a
 # redirect becomes a bodyless GET whose 200 reads as delivery.
 expect_mutant killed "redirect following restored on the /health probe" \
-  'curl -s --fail --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"' \
-  'curl -s --fail -L --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"'
+  'curl -s -w '"'"'\n%{http_code}'"'"' --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"' \
+  'curl -s -w '"'"'\n%{http_code}'"'"' -L --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health"'
 
 expect_mutant killed "redirect following restored on the checkpoint POST" \
   "curl -s -o /dev/null -w '%{http_code}' --max-redirs 0 --max-time 3 -X POST" \

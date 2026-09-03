@@ -143,10 +143,21 @@ def make_handler(work_dir):
 
             location = str(scenario.get("location") or "")
             if location:
+                # A redirect may carry a BODY, and that is the case that
+                # matters: a probe gated only on "not an error" would parse it
+                # and relay values from a response the platform never meant as
+                # an answer. Sending Content-Length 0 here would make the
+                # matrix structurally unable to see that.
+                payload = str(scenario.get("body") or "").encode("utf-8")
                 self.send_response(int(scenario.get("status") or 302))
                 self.send_header("Location", location)
-                self.send_header("Content-Length", "0")
+                self.send_header("Content-Type", scenario.get("content_type") or "application/json")
+                self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
+                try:
+                    self.wfile.write(payload)
+                except BrokenPipeError:
+                    pass
                 return
 
             payload = str(scenario.get("body") or "").encode("utf-8")
@@ -180,7 +191,16 @@ def make_handler(work_dir):
 
             if self.path == "/v1/ping":
                 scenario = load_scenario()
+                ping_status = int(scenario.get("ping_status") or 200)
                 ping_location = str(scenario.get("ping_location") or "")
+                if not ping_location and ping_status // 100 != 2:
+                    # A non-2xx checkpoint response with no redirect: the ping
+                    # was rejected outright. Recorded nowhere, and the stamp
+                    # must not advance.
+                    self.send_response(ping_status)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 if ping_location:
                     # Deliberately BEFORE recording the ping: a redirected POST
                     # is not a delivery, and the file must stay empty so the

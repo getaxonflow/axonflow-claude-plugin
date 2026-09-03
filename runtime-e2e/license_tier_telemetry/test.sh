@@ -141,16 +141,25 @@ if [ -z "$PING" ]; then
   exit 1
 fi
 
-GOT=$(printf '%s' "$PING" | jq -r 'if has("license_tier") then (.license_tier | tostring) else "__ABSENT__" end')
+# Presence is asked of jq directly, never encoded into a sentinel string. A
+# sentinel is a value the SERVER can also send: a platform answering
+# `"tier":"__ABSENT__"` would make a present key indistinguishable from a
+# missing one, in the very comparison whose job is telling those apart.
+ping_has() { printf '%s' "$PING" | jq -e --arg k "$1" 'has($k)' >/dev/null 2>&1; }
+ping_get() { printf '%s' "$PING" | jq -r --arg k "$1" '.[$k] | tostring'; }
+# Only for MESSAGES - never compared against.
+ping_show() { if ping_has "$1"; then ping_get "$1"; else printf '(absent)'; fi; }
+
+GOT=$(ping_show license_tier)
 
 if [ "$EXPECT_ABSENT" = "1" ]; then
-  if [ "$GOT" = "__ABSENT__" ]; then
+  if ! ping_has license_tier; then
     echo "PASS: agent reports no tier and the heartbeat omits license_tier"
   else
     echo "FAIL: agent reports no tier but the heartbeat carried license_tier=$GOT" >&2
     RC=1
   fi
-elif [ "$GOT" = "$AGENT_TIER" ]; then
+elif ping_has license_tier && [ "$(ping_get license_tier)" = "$AGENT_TIER" ]; then
   echo "PASS: heartbeat license_tier=$GOT matches the tier the live agent reports, verbatim"
 else
   echo "FAIL: heartbeat license_tier=$GOT but the live agent reports $AGENT_TIER" >&2
@@ -168,16 +177,15 @@ for member in edition deployment_mode; do
   esac
   agent_value=$(printf '%s' "$HEALTH" | jq -r --arg k "$member" \
     'if type == "object" and (.[$k] | type) == "string" then .[$k] else empty end' 2>/dev/null || printf '')
-  ping_value=$(printf '%s' "$PING" | jq -r --arg k "$ping_field" \
-    'if has($k) then (.[$k] | tostring) else "__ABSENT__" end')
+  ping_value=$(ping_show "$ping_field")
   if [ -z "$agent_value" ]; then
-    if [ "$ping_value" = "__ABSENT__" ]; then
+    if ! ping_has "$ping_field"; then
       echo "PASS: agent reports no $member and the heartbeat omits $ping_field"
     else
       echo "FAIL: agent reports no $member but the heartbeat carried $ping_field=$ping_value" >&2
       RC=1
     fi
-  elif [ "$ping_value" = "$agent_value" ]; then
+  elif ping_has "$ping_field" && [ "$(ping_get "$ping_field")" = "$agent_value" ]; then
     echo "PASS: heartbeat $ping_field=$ping_value matches the live agent, verbatim"
   else
     echo "FAIL: heartbeat $ping_field=$ping_value but the live agent reports $agent_value" >&2
@@ -188,7 +196,7 @@ done
 # The same run must also prove the dimensions stay separate against a real
 # platform, not only against a scripted one.
 DM=$(printf '%s' "$PING" | jq -r '.deployment_mode')
-if [ "$GOT" != "$DM" ] || [ "$GOT" = "__ABSENT__" ]; then
+if ! ping_has license_tier || [ "$(ping_get license_tier)" != "$DM" ]; then
   echo "PASS: license_tier ($GOT) and deployment_mode ($DM) reported as separate dimensions"
 else
   echo "FAIL: license_tier and deployment_mode both read $GOT — conflated" >&2
@@ -199,7 +207,7 @@ fi
 # PLATFORM; deployment_mode describes where this plugin is pointed. They may
 # legitimately coincide on some deployments, so this asserts only that the
 # local classification was not REPLACED by the platform's answer.
-PDM=$(printf '%s' "$PING" | jq -r 'if has("platform_deployment_mode") then .platform_deployment_mode else "__ABSENT__" end')
+PDM=$(ping_show platform_deployment_mode)
 LOCAL_EXPECTED=$(printf '%s' "$AXONFLOW_ENDPOINT" | grep -qE 'try\.getaxonflow\.com' && printf 'community_saas' || printf 'self_hosted')
 if [ "$DM" = "$LOCAL_EXPECTED" ]; then
   echo "PASS: deployment_mode stayed this plugin's own classification ($DM); platform_deployment_mode=$PDM"

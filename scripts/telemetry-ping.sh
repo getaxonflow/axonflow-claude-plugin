@@ -186,14 +186,29 @@ SDK_VERSION=$(jq -r '.version // "unknown"' "$PLUGIN_DIR/.claude-plugin/plugin.j
 # diagnostic. jq already buffered the same document to parse it, the endpoint
 # is the user's own configured agent, and the only part that reaches the wire
 # is the tier string, which IS length-capped below.
-# --max-redirs 0 PINS a property this call already had. Without -L curl does
-# not follow a redirect at all, so a 3xx yields an empty body here and nothing
-# is learned - which is correct. But nothing asserted it, and adding -L later
-# would silently make the relayed values come from whatever host the configured
-# endpoint chose to point at, breaking the disclosure that they are what YOUR
-# platform reported. sdk-rust#89 found exactly that in a client whose library
-# followed redirects by default.
-HEALTH_BODY=$(curl -s --fail --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null || printf '')
+# ONLY a 2xx body is an answer.
+#
+# `--fail` was not enough and the gap was not theoretical: it rejects >= 400
+# only, so a 3xx that carried a JSON body had that body parsed and its values
+# relayed as though the configured platform had reported them. A redirect is
+# not an answer - it is a pointer to somewhere this probe deliberately does not
+# follow - so reading its body would relay values from a response the platform
+# never meant as one. Measured with a 302 carrying a full /health document:
+# every relayed field came from it.
+#
+# The status is captured alongside the body (-w appends it as a final line)
+# rather than inferred from curl's exit code, because the exit code cannot
+# distinguish 200 from 302.
+#
+# --max-redirs 0 pins the other half: without -L curl does not follow at all,
+# and this stops a future -L from silently making the relayed values come from
+# whatever host the configured endpoint chose to point at (sdk-rust#89).
+HEALTH_RAW=$(curl -s -w '\n%{http_code}' --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" "${ENDPOINT}/health" 2>/dev/null || printf '')
+HEALTH_CODE=$(printf '%s' "$HEALTH_RAW" | tail -n1)
+HEALTH_BODY=""
+case "$HEALTH_CODE" in
+  2??) HEALTH_BODY=$(printf '%s' "$HEALTH_RAW" | sed '$d') ;;
+esac
 
 # ---------------------------------------------------------------------------
 # relayed_health_value <key>
@@ -224,10 +239,19 @@ HEALTH_BODY=$(curl -s --fail --max-redirs 0 --max-time 2 -H "X-Axonflow-Client: 
 # observable the gate says so instead of this comment quietly going stale.
 relayed_health_value() {
   local key="$1" value
-  value=$(printf '%s' "$HEALTH_BODY" | jq -r --arg k "$key" 'if type == "object" and (.[$k] | type) == "string" then .[$k] else empty end' 2>/dev/null || printf '')
-  if [ "${#value}" -gt 64 ]; then
-    value=""
-  fi
+  # Every condition is inside jq, deliberately:
+  #
+  #   utf8bytelength - the cap is BYTES, which is what the receiver's 64 KiB
+  #     body limit is measured in. Bash's ${#var} counts CHARACTERS, so a
+  #     64-character value of 3-byte runes is 192 bytes and passed a cap that
+  #     was documented as bytes.
+  #
+  #   index("\u0000") - a NUL cannot survive a shell variable. Command
+  #     substitution drops it AND writes a warning to stderr, and this script
+  #     must never write to stderr (it runs from a hook). Dropping the value
+  #     whole keeps that silent and keeps the relay verbatim-or-nothing: a
+  #     NUL-stripped string is not what the platform said.
+  value=$(printf '%s' "$HEALTH_BODY" | jq -r --arg k "$key" 'if type == "object" and (.[$k] | type) == "string" and (.[$k] | utf8bytelength) <= 64 and (.[$k] | index("\u0000")) == null then .[$k] else empty end' 2>/dev/null || printf '')
   printf '%s' "$value"
 }
 

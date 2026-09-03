@@ -490,6 +490,23 @@ echo "--- Redirects are not followed, on either leg ---"
 # learned - and, crucially, the redirect TARGET is never contacted. The target
 # serves values a relay would happily forward, so finding them on the wire
 # would mean the probe read from a host the caller never configured.
+# THE case a Content-Length-0 redirect fixture could not express: the 302
+# CARRIES a full /health document. A probe gated only on "not an error" parses
+# it and relays every value from a response the platform never meant as an
+# answer. `--fail` alone rejects >= 400 only, so this passed before the status
+# was checked explicitly.
+run_case "/health 302 CARRYING a health body" "$LIVE_ENDPOINT" \
+  "$(printf '{"status":302,"location":"%s/elsewhere","body":"{\\"version\\":\\"6.6.6\\",\\"tier\\":\\"LeakedFromRedirect\\",\\"edition\\":\\"leaked\\",\\"deployment_mode\\":\\"leaked\\"}"}' "$LIVE_ENDPOINT")"
+expect_absent "/health 302 carrying a body"
+expect_field_absent "/health 302 carrying a body" edition
+expect_field_absent "/health 302 carrying a body" platform_deployment_mode
+REDIR_PV=$(printf '%s' "$CASE_PING" | jq -r '.platform_version')
+if [ "$REDIR_PV" = "null" ]; then
+  pass "a 302's body is not mined for platform_version either"
+else
+  fail "platform_version is $REDIR_PV — read from a 302's body"
+fi
+
 run_case "/health redirects elsewhere" "$LIVE_ENDPOINT" \
   "$(printf '{"status":302,"location":"%s/elsewhere","body":""}' "$LIVE_ENDPOINT")"
 expect_absent "/health redirects elsewhere"
@@ -522,6 +539,47 @@ if [ -z "$CASE_REDIRECT_TARGET_HITS" ]; then
 else
   fail "the POST followed a redirect: $CASE_REDIRECT_TARGET_HITS"
 fi
+
+# A checkpoint that REJECTS outright. Distinct from the redirect case: this is
+# the >= 400 half of the guard, which moved out of `--fail` and into the `2??`
+# pattern when delivery became a status check. A pattern can narrow silently in
+# a way a flag cannot, so the boundary is tested from BOTH sides.
+run_case "checkpoint POST rejected 500" "$LIVE_ENDPOINT" \
+  "$(health_body '{"version":"10.4.0","tier":"Enterprise"}' | jq -c '. + {ping_status: 500}')" 0
+if [ "$CASE_STAMPED" = "0" ]; then
+  pass "a 500 from the checkpoint does NOT advance the stamp"
+else
+  fail "the stamp advanced on a rejected ping"
+fi
+
+run_case "checkpoint POST rejected 404" "$LIVE_ENDPOINT" \
+  "$(health_body '{"version":"10.4.0","tier":"Enterprise"}' | jq -c '. + {ping_status: 404}')" 0
+if [ "$CASE_STAMPED" = "0" ]; then
+  pass "a 404 from the checkpoint does NOT advance the stamp"
+else
+  fail "the stamp advanced on a rejected ping"
+fi
+
+# A NUL cannot survive a shell variable: command substitution drops it and
+# warns on stderr, and this script must never write to stderr. Dropped whole.
+run_case "tier containing a NUL byte" "$LIVE_ENDPOINT" \
+  "$(health_body '{"version":"10.4.0","tier":"Ent\u0000erprise","edition":"community"}')"
+expect_absent "tier containing a NUL byte"
+expect_field "a NUL in one value does not cost another" edition "community"
+
+# The cap is BYTES, not characters. 32 three-byte runes are 96 bytes: under a
+# character cap of 64, over a byte cap of 64. README says bytes.
+MULTIBYTE=$(printf '\u4e2d%.0s' $(seq 1 32))
+run_case "edition of 32 three-byte runes (96 bytes)" "$LIVE_ENDPOINT" \
+  "$(health_body "{\"version\":\"10.4.0\",\"tier\":\"Enterprise\",\"edition\":\"$MULTIBYTE\"}")"
+expect_field_absent "96-byte edition" edition
+expect_tier "an over-byte-cap edition does not cost the tier" "Enterprise"
+
+# ...and one that fits in bytes still round-trips.
+MULTIBYTE_OK=$(printf '\u4e2d%.0s' $(seq 1 21))
+run_case "edition of 21 three-byte runes (63 bytes)" "$LIVE_ENDPOINT" \
+  "$(health_body "{\"version\":\"10.4.0\",\"edition\":\"$MULTIBYTE_OK\"}")"
+expect_field "63-byte edition" edition "$MULTIBYTE_OK"
 
 # The positive control for the two above: an ordinary 200 DOES stamp. Without
 # it, a script that never stamped at all would pass both assertions.
