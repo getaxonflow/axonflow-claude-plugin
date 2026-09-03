@@ -40,6 +40,16 @@ print("server modules imported", flush=True)
 
 DEFAULT_SCENARIO = {
     "status": 200,
+    # When set, /health answers a 3xx carrying this Location instead of a body.
+    # The target is served by this same server at /elsewhere and records that it
+    # was reached, so a test can assert the probe did NOT follow.
+    "location": "",
+    # The status and Location for POST /v1/ping. A 3xx here is the case that
+    # matters: curl does not follow it, so the receiver never sees the payload,
+    # and anything that treats the response as success advances the 7-day stamp
+    # on a ping that was never delivered.
+    "ping_status": 200,
+    "ping_location": "",
     "body": '{"status":"healthy","version":"10.3.0-harness","tier":"Enterprise"}',
     "delay": 0.0,
     "content_type": "application/json",
@@ -50,6 +60,11 @@ def make_handler(work_dir):
     scenario_path = os.path.join(work_dir, "_scenario.json")
     pings_path = os.path.join(work_dir, "_pings.jsonl")
     health_hits_path = os.path.join(work_dir, "_health_hits")
+    # Every request that reaches a REDIRECT TARGET, by name. A test asserting
+    # "the probe did not follow" reads this: an empty file is the proof, and it
+    # is a different observation from "no value was relayed", which a plain
+    # network failure would also produce.
+    redirect_target_path = os.path.join(work_dir, "_redirect_target_hits")
 
     def load_scenario():
         try:
@@ -66,7 +81,43 @@ def make_handler(work_dir):
         def log_message(self, *_args, **_kwargs):
             return
 
+        def _record_redirect_target(self, what):
+            try:
+                with open(redirect_target_path, "a") as fh:
+                    fh.write(what + "\n")
+            except OSError:
+                pass
+
         def do_GET(self):
+            # The target a redirected /health would land on, if anything ever
+            # followed one. It answers with values a relay would happily
+            # forward, so a test that finds them on the wire has caught the
+            # probe reading from a host the caller never configured.
+            if self.path == "/elsewhere":
+                self._record_redirect_target("GET /elsewhere")
+                body = b'{"status":"healthy","version":"9.9.9",'
+                body += b'"tier":"LeakedFromElsewhere","edition":"leaked",'
+                body += b'"deployment_mode":"leaked"}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
+            # Where a redirected POST would land. A client that followed one
+            # would arrive here as a bodyless GET and be answered 200 - which is
+            # exactly how a redirect turns into a false delivery.
+            if self.path == "/sink":
+                self._record_redirect_target("GET /sink")
+                body = b'{"ok":true}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
             if self.path != "/health":
                 self.send_response(404)
                 self.send_header("Content-Length", "0")
@@ -90,6 +141,25 @@ def make_handler(work_dir):
             if delay > 0:
                 time.sleep(delay)
 
+            location = str(scenario.get("location") or "")
+            if location:
+                # A redirect may carry a BODY, and that is the case that
+                # matters: a probe gated only on "not an error" would parse it
+                # and relay values from a response the platform never meant as
+                # an answer. Sending Content-Length 0 here would make the
+                # matrix structurally unable to see that.
+                payload = str(scenario.get("body") or "").encode("utf-8")
+                self.send_response(int(scenario.get("status") or 302))
+                self.send_header("Location", location)
+                self.send_header("Content-Type", scenario.get("content_type") or "application/json")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                try:
+                    self.wfile.write(payload)
+                except BrokenPipeError:
+                    pass
+                return
+
             payload = str(scenario.get("body") or "").encode("utf-8")
             self.send_response(int(scenario.get("status") or 200))
             self.send_header("Content-Type", scenario.get("content_type") or "application/json")
@@ -105,7 +175,43 @@ def make_handler(work_dir):
             length = int(self.headers.get("Content-Length", "0") or "0")
             raw = self.rfile.read(length) if length else b""
 
+            if self.path == "/sink":
+                # A followed redirect arrives here. Recorded so a test can
+                # distinguish "nothing was delivered" from "delivered somewhere
+                # else"; the body length is recorded because a redirected POST
+                # arrives with none.
+                self._record_redirect_target("POST /sink len=%d" % len(raw))
+                body = b'{"ok":true}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+
             if self.path == "/v1/ping":
+                scenario = load_scenario()
+                ping_status = int(scenario.get("ping_status") or 200)
+                ping_location = str(scenario.get("ping_location") or "")
+                if not ping_location and ping_status // 100 != 2:
+                    # A non-2xx checkpoint response with no redirect: the ping
+                    # was rejected outright. Recorded nowhere, and the stamp
+                    # must not advance.
+                    self.send_response(ping_status)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                if ping_location:
+                    # Deliberately BEFORE recording the ping: a redirected POST
+                    # is not a delivery, and the file must stay empty so the
+                    # matrix's "no heartbeat delivered" and "stamp did not
+                    # advance" assertions mean what they say.
+                    self.send_response(int(scenario.get("ping_status") or 302))
+                    self.send_header("Location", ping_location)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+
                 # Store the body verbatim. Re-encoding through json would hide
                 # exactly the thing under test: whether the key is ABSENT or
                 # merely null/empty.
@@ -134,7 +240,7 @@ def main():
     work_dir = sys.argv[2]
     os.makedirs(work_dir, exist_ok=True)
 
-    for name, initial in (("_health_hits", "0"),):
+    for name, initial in (("_health_hits", "0"), ("_redirect_target_hits", "")):
         path = os.path.join(work_dir, name)
         if not os.path.exists(path):
             with open(path, "w") as fh:
