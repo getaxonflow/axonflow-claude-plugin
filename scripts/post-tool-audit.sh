@@ -74,6 +74,18 @@ if [ -n "$AUTH" ]; then
   AUTH_HEADER=(-H "Authorization: Basic $AUTH")
 fi
 AUTH_HEADER+=(-H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}")
+# ADR-065 capability handshake (axonflow-enterprise#3763). Declares what this
+# enforcement point can discharge, so the platform refuses to hand it a
+# mandatory obligation it has said it cannot carry out.
+#
+# Added ONLY when non-empty. A header that is PRESENT with an empty value is
+# MALFORMED to the platform and refuses the request, which an ABSENT header
+# does not - so an unconditional -H here would 400 every unconfigured install.
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/pep-handshake.sh"
+if [ -n "${AXONFLOW_PEP_HANDSHAKE:-}" ]; then
+  AUTH_HEADER+=(-H "X-Axonflow-PEP-Handshake: ${AXONFLOW_PEP_HANDSHAKE}")
+fi
 if [ -n "${AXONFLOW_LICENSE_TOKEN:-}" ]; then
   AUTH_HEADER+=(-H "X-License-Token: ${AXONFLOW_LICENSE_TOKEN}")
 fi

@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.12.0] - 2026-09-05
+
+### Added
+
+- **The plugin now declares what it can enforce** (ADR-065 capability handshake; getaxonflow/axonflow-enterprise#3763). Set `AXONFLOW_PEP_AUDIENCE` to the audience your AxonFlow decision proofs are bound to, and every governed call carries `X-Axonflow-PEP-Handshake`: a short document naming this enforcement point and the obligation types it can discharge. A platform running v10.4.0 or later that would attach a mandatory obligation this plugin has declared it cannot carry out refuses the request instead of handing the content over and assuming the plugin will cope.
+- **Both attach points carry it, and a test proves they agree.** This plugin builds headers in two places: the `headersHelper` inside `.mcp.json` for the MCP session, and `scripts/` for every hook call. A declaration added to one and not the other would be absent from half the plugin's traffic, silently. `tests/test-pep-handshake.sh` asserts that both produce the *same* bytes and that those bytes are the platform's own.
+- **Off by default, and absent rather than empty when off.** Leave `AXONFLOW_PEP_AUDIENCE` unset and no header is sent at all, on either carrier, so the plugin behaves byte for byte as 1.11.0 against every platform version. The distinction is load bearing: a header present with an empty value is malformed to the platform and would refuse the call, which an absent header does not.
+- **The plugin declares no capabilities, and that is the honest answer.** A redaction obligation is discharged by substituting the platform's engine-masked text for the original, and AxonFlow does not permit a client to redact for itself. This plugin's hooks submit a statement and act on the verdict; they perform no substitution, so the plugin cannot establish that such an obligation would be discharged and does not claim it can.
+- **A malformed `AXONFLOW_PEP_AUDIENCE` builds no handshake and says so on stderr**, rather than silently disabling itself and leaving an operator believing a control is in force.
+
 ## [Unreleased]
 
 ### Added
