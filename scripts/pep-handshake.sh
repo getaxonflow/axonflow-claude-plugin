@@ -40,7 +40,16 @@ if [ -z "${AXONFLOW_PEP_HANDSHAKE:-}" ] && [ -n "${AXONFLOW_PEP_AUDIENCE:-}" ]; 
   # Bound the audience before it reaches the wire. The platform refuses
   # anything outside this grammar, so a malformed value would 400 every
   # governed call; refusing to build it here fails loudly at one place instead.
-  if printf '%s' "$AXONFLOW_PEP_AUDIENCE" | LC_ALL=C grep -qE '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'; then
+  # TWO checks, and the newline one is not redundant. `grep` is LINE-BASED, so
+  # an audience of "aud\nhas spaces" matches on its FIRST line and passes a
+  # `^...$` test that looks airtight - and the document then carries a raw
+  # newline inside a JSON string, which is invalid JSON and which the platform
+  # refuses as a malformed handshake on every governed call. The equality test
+  # against a newline-stripped copy is what rejects a multi-line value before
+  # the grammar check ever runs.
+  _pep_flat=$(printf '%s' "$AXONFLOW_PEP_AUDIENCE" | tr -d '\n\r')
+  if [ "$_pep_flat" = "$AXONFLOW_PEP_AUDIENCE" ] \
+     && printf '%s' "$AXONFLOW_PEP_AUDIENCE" | LC_ALL=C grep -qE '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'; then
     # profile_version, pep_id, audience, capabilities - every member required,
     # in the platform encoder's member order. `capabilities` is ALWAYS present:
     # an omitted member is MALFORMED, while [] is the declaration "I discharge
@@ -52,7 +61,7 @@ if [ -z "${AXONFLOW_PEP_HANDSHAKE:-}" ] && [ -n "${AXONFLOW_PEP_AUDIENCE:-}" ]; 
     AXONFLOW_PEP_HANDSHAKE=$(printf '%s' "$_pep_doc" \
       | base64 | tr -d '\n' | tr '+/' '-_' | tr -d '=')
     export AXONFLOW_PEP_HANDSHAKE
-    unset _pep_doc
+    unset _pep_doc _pep_flat
   else
     # Loud, and does NOT fall back to sending nothing silently: an operator who
     # set the variable believes a control is in force.
