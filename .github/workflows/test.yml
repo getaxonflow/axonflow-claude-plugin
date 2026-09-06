@@ -41,8 +41,9 @@ jobs:
 
       - name: Run hook regression tests (mock server)
         run: |
-          chmod +x tests/test-hooks.sh scripts/*.sh
+          chmod +x tests/test-hooks.sh tests/test-pep-handshake.sh scripts/*.sh
           ./tests/test-hooks.sh
+          ./tests/test-pep-handshake.sh
 
       - name: Run upgrade-prompt envelope-handler unit tests
         run: |
