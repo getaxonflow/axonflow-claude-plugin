@@ -1,6 +1,7 @@
 # Changelog
 
 ## [1.13.0] - 2026-09-14: a policy answer without a decision now blocks the tool call
+
 ### Fixed
 
 - **A policy answer without a decision now blocks the tool call instead of allowing it.** When the AxonFlow agent answers `check_policy` with a result that carries no boolean `allowed`, or a result flagged `isError`, the pre-tool hook now denies with the reason, and the post-tool hook tells Claude not to use output it could not check. Before this, both hooks read such an answer as allowed; on Community SaaS the Free-tier limit answers exactly that way, so tool calls over the limit ran ungoverned with nothing shown.
