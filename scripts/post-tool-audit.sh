@@ -61,11 +61,21 @@ resolve_license_token
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/upgrade-prompt.sh"
 
+# Emit a PostToolUse governance alert and stop.
+axonflow_post_alert() {
+  jq -n --arg m "$1" '{hookSpecificOutput: {hookEventName: "PostToolUse", additionalContext: $m}}'
+  exit 0
+}
+
 # When a recent governed call landed on a Free-tier cap, the throttle file
-# tells us to stop sending traffic until the deadline. Audit + scan are both
-# best-effort — falling open here is correct (the upgrade prompt was
-# already surfaced when the throttle landed).
+# tells us to stop sending traffic until the deadline. While a hosted
+# Free-tier limit holds, the output cannot be checked, so the model is told
+# not to use it (ruled 2026-09-14; reversible here). The 401 pause
+# (auth_failure) still stays silent.
 if axonflow_throttle_active; then
+  if [ "$(axonflow_throttle_limit_type)" != "auth_failure" ]; then
+    axonflow_post_alert "$AXONFLOW_LIMIT_POST_ALERT"
+  fi
   exit 0
 fi
 
@@ -228,10 +238,10 @@ if [ -n "$OUTPUT_TEXT" ] && [ "$OUTPUT_TEXT" != "null" ]; then
         }
       }')" 2>/dev/null) || SCAN_HTTP=""
 
-  # V1 Plugin Pro: stamp throttle + nudge operator on envelope responses.
-  # Caller falls open whether or not the envelope was detected.
+  # V1 Plugin Pro: stamp throttle + show the upgrade prompt on envelope
+  # responses, and tell the model the output could not be checked.
   if axonflow_handle_envelope_response "$SCAN_HTTP" "$SCAN_BODY" "$SCAN_HEADERS"; then
-    exit 0
+    axonflow_post_alert "$AXONFLOW_LIMIT_POST_ALERT"
   fi
   # HTTP 401 on the scan call — invalid/expired credentials. Same throttle
   # path as pre-tool-check: stamp 5-minute cooldown + once-per-day nudge,
@@ -245,10 +255,28 @@ if [ -n "$OUTPUT_TEXT" ] && [ "$OUTPUT_TEXT" != "null" ]; then
   # If PII was found, add context for Claude
   if [ -n "$SCAN_RESPONSE" ]; then
     SCAN_RESULT=$(echo "$SCAN_RESPONSE" | jq -r '.result.content[0].text // empty' 2>/dev/null || echo "")
+    # A JSON-RPC result with no tool result carries no decision.
+    if [ -z "$SCAN_RESULT" ] && echo "$SCAN_RESPONSE" | jq -e 'has("result")' >/dev/null 2>&1; then
+      axonflow_post_alert "GOVERNANCE ALERT: AxonFlow could not check this tool output (the AxonFlow agent returned no decision). Do not use or reference the output in your response until it can be checked."
+    fi
     if [ -n "$SCAN_RESULT" ]; then
+      # A result flagged isError, or one without a boolean `allowed`, is not a
+      # decision (ruled 2026-09-14). The Free-tier cap answers this way with its
+      # upgrade envelope as the text: the handler still shows the prompt.
+      SCAN_IS_ERROR=$(echo "$SCAN_RESPONSE" | jq -r 'if .result.isError == true then "true" else "false" end' 2>/dev/null || echo "false")
+      SCAN_HAS_DECISION=$(echo "$SCAN_RESULT" | jq -r 'if (.allowed | type) == "boolean" then "true" else "false" end' 2>/dev/null || echo "false")
+      if [ "$SCAN_IS_ERROR" = "true" ] || [ "$SCAN_HAS_DECISION" != "true" ]; then
+        if axonflow_handle_envelope_text "$SCAN_RESULT"; then
+          axonflow_post_alert "$AXONFLOW_LIMIT_POST_ALERT"
+        fi
+        SCAN_ERROR=$(echo "$SCAN_RESULT" | jq -r '.error // empty' 2>/dev/null || echo "")
+        axonflow_post_alert "GOVERNANCE ALERT: AxonFlow could not check this tool output (${SCAN_ERROR:-the AxonFlow agent returned no decision}). Do not use or reference the output in your response until it can be checked."
+      fi
       REDACTED=$(echo "$SCAN_RESULT" | jq -r '.redacted_message // empty' 2>/dev/null || echo "")
       POLICIES_FOUND=$(echo "$SCAN_RESULT" | jq -r '.policies_evaluated // 0' 2>/dev/null || echo "0")
-      ALLOWED=$(echo "$SCAN_RESULT" | jq -r '.allowed // true' 2>/dev/null || echo "true")
+      # Explicit boolean read: jq's `//` treats false as absent, so the old
+      # `.allowed // true` let an output deny through.
+      ALLOWED=$(echo "$SCAN_RESULT" | jq -r 'if .allowed == false then "false" else "true" end' 2>/dev/null || echo "true")
 
       if [ -n "$REDACTED" ] && [ "$REDACTED" != "null" ]; then
         # PII detected in tool output. PostToolUse hooks cannot transform

@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A policy answer without a decision now blocks the tool call instead of allowing it.** When the AxonFlow agent answers `check_policy` with a result that carries no boolean `allowed`, or a result flagged `isError`, the pre-tool hook now denies with the reason, and the post-tool hook tells Claude not to use output it could not check. Before this, both hooks read such an answer as allowed; on Community SaaS the Free-tier limit answers exactly that way, so tool calls over the limit ran ungoverned with nothing shown.
+- **Over the Community SaaS Free-tier limit, tool calls are denied with the upgrade prompt instead of running ungoverned.** The upgrade prompt still prints at most once a day, and the back-off still stops network traffic until the limit resets; while it holds, the pre-tool hook denies and the post-tool hook raises a governance alert. The 401 credential pause is unchanged.
+- **An unknown JSON-RPC error code from the agent now fails closed.** Parse errors (`-32700`) and internal errors (`-32603`) still fail open as transient.
+- **The post-tool hook no longer drops an output deny.** It read `allowed` with `.allowed // true`, which jq evaluates to true for `false`; it now reads the boolean explicitly.
+
 ## [1.12.0] - 2026-09-05
 
 ### Added
