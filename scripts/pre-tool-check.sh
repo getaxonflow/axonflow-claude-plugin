@@ -87,6 +87,12 @@ resolve_license_token
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/upgrade-prompt.sh"
 
+# Emit a structured PreToolUse deny and stop (the hook's fail-closed shape).
+axonflow_pre_deny() {
+  jq -n --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
+  exit 0
+}
+
 # Build auth header array safely (avoids word-splitting)
 AUTH_HEADER=()
 if [ -n "$AUTH" ]; then
@@ -242,10 +248,14 @@ fi
 
 # V1 Plugin Pro back-off: when a recent governed call returned a 429/403
 # envelope, the throttle-until stamp suppresses outbound traffic until the
-# envelope's resets_at deadline. Fall open immediately so the operator's
-# tool calls aren't held up while we wait out the cap (the upgrade prompt
-# was already surfaced when the throttle landed).
+# envelope's resets_at deadline. While a hosted Free-tier limit holds, the
+# tool call is DENIED with the limit named (the upgrade prompt was surfaced
+# when the throttle landed): over the cap is deny, not governance off (ruled
+# 2026-09-14; reversible here). The 401 pause (auth_failure) still falls open.
 if axonflow_throttle_active; then
+  if [ "$(axonflow_throttle_limit_type)" != "auth_failure" ]; then
+    axonflow_pre_deny "$AXONFLOW_LIMIT_DENY_REASON"
+  fi
   exit 0
 fi
 
@@ -292,11 +302,11 @@ if [ "$CURL_EXIT" -ne 0 ]; then
 fi
 
 # Detect the V1 Plugin Pro envelope on 429 / 403. When present, the helper
-# stamps throttle-until + emits the upgrade prompt to stderr, and we fall
-# open (Free-tier without policy enforcement is the natural degraded state
-# until the cap clears).
+# stamps throttle-until + emits the upgrade prompt to stderr, and the tool
+# call is DENIED: over a hosted Free-tier limit is deny with the visible
+# upgrade prompt, not governance off (ruled 2026-09-14; reversible here).
 if axonflow_handle_envelope_response "$HTTP_CODE" "$PRECHECK_BODY" "$PRECHECK_HEADERS"; then
-  exit 0
+  axonflow_pre_deny "$AXONFLOW_LIMIT_DENY_REASON"
 fi
 
 # HTTP 401 — invalid/expired credentials. Stamp a 5-minute throttle so the
@@ -337,7 +347,7 @@ fi
 #   Invalid params (-32602):    DENY — plugin bug, operator should upgrade
 #   Parse errors (-32700):      ALLOW — transient
 #   Internal errors (-32603):   ALLOW — server-side fault, not operator's
-#   Everything else:            ALLOW — unknown failure, default to allow
+#   Everything else:            DENY — unknown code, fail closed (2026-09-14)
 JSONRPC_ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty' 2>/dev/null || echo "")
 if [ -n "$JSONRPC_ERROR" ]; then
   JSONRPC_CODE=$(echo "$RESPONSE" | jq -r '.error.code // 0' 2>/dev/null || echo "0")
@@ -396,9 +406,13 @@ if [ -n "$JSONRPC_ERROR" ]; then
         }'
       exit 0
       ;;
-    *)
+    -32603|-32700)
       # Transient or server-side — fail open.
       exit 0
+      ;;
+    *)
+      # An unknown code is not a decision: fail closed (ruled 2026-09-14).
+      axonflow_pre_deny "AxonFlow governance blocked: the AxonFlow agent answered an unexpected error (${JSONRPC_ERROR}, code ${JSONRPC_CODE}), so this tool call is blocked."
       ;;
   esac
 fi
@@ -406,9 +420,27 @@ fi
 # Parse the MCP response to get the tool result
 TOOL_RESULT=$(echo "$RESPONSE" | jq -r '.result.content[0].text // empty' 2>/dev/null || echo "")
 if [ -z "$TOOL_RESULT" ]; then
-  # Got a response but couldn't extract tool result — unexpected format
-  # Fail-open for robustness (not an auth issue)
+  # A JSON-RPC result with no tool result carries no decision: fail closed.
+  # Anything else (no result object at all) is an unexpected format: fail
+  # open for robustness, as before.
+  if echo "$RESPONSE" | jq -e 'has("result")' >/dev/null 2>&1; then
+    axonflow_pre_deny "AxonFlow governance blocked: the AxonFlow agent returned a policy result without a decision, so this tool call is blocked."
+  fi
   exit 0
+fi
+
+# A result flagged isError, or one without a boolean `allowed`, is not a
+# decision: fail closed (ruled 2026-09-14). The Community SaaS Free-tier cap
+# answers exactly this way, with its upgrade envelope as the result text;
+# the envelope goes through the handler so the prompt and throttle still apply.
+RESULT_IS_ERROR=$(echo "$RESPONSE" | jq -r 'if .result.isError == true then "true" else "false" end' 2>/dev/null || echo "false")
+HAS_DECISION=$(echo "$TOOL_RESULT" | jq -r 'if (.allowed | type) == "boolean" then "true" else "false" end' 2>/dev/null || echo "false")
+if [ "$RESULT_IS_ERROR" = "true" ] || [ "$HAS_DECISION" != "true" ]; then
+  if axonflow_handle_envelope_text "$TOOL_RESULT"; then
+    axonflow_pre_deny "$AXONFLOW_LIMIT_DENY_REASON"
+  fi
+  RESULT_ERROR=$(echo "$TOOL_RESULT" | jq -r '.error // empty' 2>/dev/null || echo "")
+  axonflow_pre_deny "AxonFlow governance blocked: ${RESULT_ERROR:-the AxonFlow agent returned a policy result without a decision}, so this tool call is blocked."
 fi
 
 # Note: jq's // operator treats false as falsy, so .allowed // true returns
