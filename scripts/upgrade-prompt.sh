@@ -384,6 +384,9 @@ _AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS="${AXONFLOW_AUTH_FAILURE_COOLDOWN_SECOND
 if ! [[ "$_AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS" =~ ^[0-9]{1,7}$ ]]; then
   _AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS=300
 fi
+# Base 10: a leading zero would otherwise read as octal in arithmetic ("08"
+# fails, and no cooldown is stamped; "010" is 8).
+_AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS=$((10#$_AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS))
 
 # axonflow_handle_auth_failure <http_code> <body_file> <headers_file>
 #   Returns 0 iff $http_code == 401. Stamps the throttle-until file with a

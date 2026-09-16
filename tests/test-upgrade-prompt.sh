@@ -837,6 +837,35 @@ test_stamp_write_format_unchanged() {
 }
 
 # ---------------------------------------------------------------------------
+# The auth_failure cooldown is read in base 10: a leading zero is not octal.
+# "08" used to fail in arithmetic ("value too great for base"), so a 401 wrote
+# no cooldown stamp and every later call asked the agent again; "0010" read
+# as 8.
+# ---------------------------------------------------------------------------
+test_cooldown_leading_zero_is_base_ten() {
+  local cache; cache=$(mk_tmp_cache)
+  trap "rm -rf '$cache'" EXIT
+  local v
+  for v in "08:8" "0010:10" "09:9" "0x10:300"; do
+    assert_eq "AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS='${v%%:*}' → ${v##*:}" "${v##*:}" "$(AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS="${v%%:*}" bash -c '. "$1"; echo "$_AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS"' _ "$HELPER" 2>&1)"
+  done
+  local body headers stderr_out before epoch
+  body=$(mktemp); echo '{"error":"invalid credentials"}' >"$body"
+  headers=$(mktemp); printf 'HTTP/2 401\r\n' >"$headers"
+  stderr_out=$(mktemp)
+  before=$(date -u +%s)
+  XDG_CACHE_HOME="$cache" AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS=08 bash -c '. "$1"; axonflow_handle_auth_failure 401 "$2" "$3"' _ "$HELPER" "$body" "$headers" 2>"$stderr_out"
+  assert_not_contains "a 401 with AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS=08 → no arithmetic error" "$(cat "$stderr_out")" "value too great"
+  epoch=$(awk 'NR==1 {print $1}' "$cache/axonflow/throttle-until" 2>/dev/null)
+  if [ -n "$epoch" ] && [ "$epoch" -ge $((before + 8)) ] && [ "$epoch" -le $((before + 10)) ]; then
+    assert_eq "a 401 with AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS=08 → a cooldown stamp 8 s out" "yes" "yes"
+  else
+    assert_eq "a 401 with AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS=08 → a cooldown stamp 8 s out" "yes" "no (epoch='$epoch' before=$before)"
+  fi
+  rm -f "$body" "$headers" "$stderr_out"
+}
+
+# ---------------------------------------------------------------------------
 # Run all tests
 # ---------------------------------------------------------------------------
 run_test "T1: 429 daily-quota envelope" test_429_daily_quota
@@ -857,6 +886,7 @@ run_test "T14: envelope nudge fires despite pre-stamped auth-failure file" \
   test_envelope_not_suppressed_by_auth_stamp
 run_test "T15: the stamp rules (axonflow_governed_stamp, clock pinned)" test_governed_stamp_rules
 run_test "T16: the shared stamp file's write and format are unchanged" test_stamp_write_format_unchanged
+run_test "T17: the auth_failure cooldown is read in base 10" test_cooldown_leading_zero_is_base_ten
 
 echo
 echo "==============================="
