@@ -72,13 +72,16 @@ silently is when a future edit to `run_claude_against_real_tenant`
 drops `--dangerously-skip-permissions` and the test starts hanging
 on the first tool.
 
+> **Never a default target: production.** Production Community SaaS (`https://try.getaxonflow.com`) is live state. This suite SKIPs there unless `AXONFLOW_E2E_ALLOW_PRODUCTION=1` is set for the run, and it has no default target at all when `AGENT_URL` is unset (`runtime_e2e_refuse_production` in `runtime-e2e/_lib/claude-runtime.sh`; axonflow-enterprise#4249, comment 5684192928).
+
 ## Pre-conditions
 
 The test handles all of these automatically and SKIPs cleanly when
 unavailable:
 
 - `claude` and `jq` on `PATH`.
-- `${AGENT_URL}/health` reachable (defaults to `https://try.getaxonflow.com`).
+- `AGENT_URL` set (there is no default target) and, when it is production `https://try.getaxonflow.com`, `AXONFLOW_E2E_ALLOW_PRODUCTION=1`: there the suite registers a tenant, creates a tenant policy on it and deletes that tenant's HITL and policy rows through AWS.
+- `${AGENT_URL}/health` reachable.
 - Either `TENANT=` and `SECRET=` env vars (re-use an existing tenant)
   or `/api/v1/register` lets us register a fresh one. The endpoint has
   a per-IP 5/hour rate limit; reuse env if you're iterating.
@@ -108,12 +111,17 @@ run (saved to `<file>.runtime-e2e-bak.<pid>`) and restoring it via the
 ## Usage
 
 ```bash
-# Default — register a fresh tenant against try.getaxonflow.com:
-bash runtime-e2e/v1_pro_mcp_tools_invocable/test.sh
+# A Community SaaS stack you own — register a fresh tenant there:
+AGENT_URL=https://try-staging.getaxonflow.com bash runtime-e2e/v1_pro_mcp_tools_invocable/test.sh
+
+# Production, deliberately (registers a tenant and writes a policy there):
+AXONFLOW_E2E_ALLOW_PRODUCTION=1 AGENT_URL=https://try.getaxonflow.com \
+  bash runtime-e2e/v1_pro_mcp_tools_invocable/test.sh
 
 # Re-use an existing tenant (avoids the per-IP /register rate limit):
 TENANT=cs_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx \
   SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx \
+  AGENT_URL=https://try-staging.getaxonflow.com \
   bash runtime-e2e/v1_pro_mcp_tools_invocable/test.sh
 
 # Self-hosted:

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Claude Code runtime E2E: revoke-override OUTCOME TEST (W2 — rule #1)
+# Claude Code runtime E2E: delete_override answers the RETIRED write on
+# AxonFlow v11.0.0, through the real MCP runtime.
 #
-# Outcome verification, not just dispatch. We seed a real override via
-# direct API, drive the agent to revoke it via the MCP runtime, then
-# verify server-side that the override is in fact revoked. The runtime
-# claim is "the agent's revoke command actually changes platform state",
-# not just "the call dispatched".
+# Session overrides are retired from v11.0.0: no override can be created, and
+# the delete_override tool answers a tool error whose text begins
+# "LEGACY_POLICY_WRITE_FROZEN: " (REST DELETE /api/v1/overrides/<id> answers
+# HTTP 409). This suite asserts the platform's answers directly, then that
+# Claude Code invokes delete_override and receives that tool error, that the
+# agent's own final message reports it, and that the list_overrides count did
+# not move. Stack posture: AXONFLOW_TRUST_IDENTITY_HEADERS=true on the agent.
 
 set -uo pipefail
 
@@ -15,49 +18,28 @@ source "$SCRIPT_DIR/../_lib/claude-runtime.sh"
 
 runtime_e2e_skip_if_unavailable
 
-AXONFLOW_AUTH_HDR="Authorization: Basic $(printf '%s:%s' "$AXONFLOW_CLIENT_ID" "$AXONFLOW_CLIENT_SECRET" | base64)"
+errors=0
+EMAIL_HDR="X-User-Email: $AXONFLOW_E2E_USER_EMAIL"
+# Any id: nothing can be created, so there is no real one to revoke.
+PROBE_ID="00000000-0000-4000-8000-00000000e2e0"
+BASELINE=$(mcp_override_count)
+echo "--- list_overrides count before: ${BASELINE:-<none>} ---"
 
-# 1. Seed a real override via direct API.
-REASON_TAG="revoke-runtime-e2e-$(date +%s)-$RANDOM"
-echo "--- Seeding override with reason tag: $REASON_TAG ---"
+assert_mcp_override_frozen "MCP delete_override (X-User-Email)" \
+  "$(mcp_tool_call delete_override "{\"override_id\":\"$PROBE_ID\"}" -H "$EMAIL_HDR")" \
+  || errors=$((errors + 1))
+REST=$(curl -s -X DELETE -H "Authorization: Basic $(printf '%s:%s' "$AXONFLOW_CLIENT_ID" "$AXONFLOW_CLIENT_SECRET" | base64)" \
+  -H "$EMAIL_HDR" -w "\nHTTP_STATUS:%{http_code}" "$AXONFLOW_ENDPOINT/api/v1/overrides/$PROBE_ID")
+assert_rest_override_frozen "REST DELETE /api/v1/overrides/<id>" "$(printf '%s' "$REST" | sed -n 's/^HTTP_STATUS://p')" "$(printf '%s' "$REST" | sed '$d')" \
+  || errors=$((errors + 1))
 
-CREATE_RESPONSE=$(curl -s -X POST \
-  -H "$AXONFLOW_AUTH_HDR" \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: local-dev-org" \
-  -H "X-User-Email: dev@getaxonflow.com" \
-  -d "{\"policy_id\":\"sys_pii_email\",\"policy_type\":\"static\",\"override_reason\":\"$REASON_TAG\",\"ttl_seconds\":300}" \
-  -w "\nHTTP_STATUS:%{http_code}" \
-  "$AXONFLOW_ENDPOINT/api/v1/overrides")
-CREATE_STATUS=$(printf '%s' "$CREATE_RESPONSE" | sed -n 's/^HTTP_STATUS://p')
-CREATE_BODY=$(printf '%s' "$CREATE_RESPONSE" | sed '$d')
-
-require_override_preflight "$CREATE_STATUS" "$CREATE_BODY" || exit 1
-
-SEED_ID=$(printf '%s' "$CREATE_BODY" | jq -r '.id')
-echo "--- Seeded override id: $SEED_ID ---"
-
-# 2. Drive the agent to revoke that exact id.
-PROMPT="Use the delete_override MCP tool from the axonflow MCP server with override_id=\"$SEED_ID\". After receiving the tool result, output exactly the literal text SMOKE_RESULT: followed by a single-line JSON like SMOKE_RESULT: {\"dispatched\":true,\"revoked\":true} if the platform succeeded, or SMOKE_RESULT: {\"dispatched\":true,\"revoked\":false} on error."
+PROMPT="Use the delete_override MCP tool from the axonflow MCP server with override_id=\"$PROBE_ID\". Then reply with exactly one line: SMOKE_RESULT: followed by a JSON object with the key \"frozen\" set to true when the tool answer text starts with LEGACY_POLICY_WRITE_FROZEN and false otherwise."
 
 OUTPUT_FILE=$(mktemp -t axonflow-claude-revoke.XXXXXX)
+trap 'rm -f "$OUTPUT_FILE"' EXIT
 
-# Best-effort cleanup: if the agent didn't revoke, we should — leaving
-# leaked active overrides across runs makes future runs flaky.
-cleanup() {
-  curl -s -X DELETE \
-    -H "$AXONFLOW_AUTH_HDR" \
-    -H "X-Tenant-ID: local-dev-org" \
-    -H "X-User-Email: dev@getaxonflow.com" \
-    "$AXONFLOW_ENDPOINT/api/v1/overrides/$SEED_ID" >/dev/null 2>&1 || true
-  rm -f "${OUTPUT_FILE:-}"
-}
-trap cleanup EXIT
-
-echo "--- Driving Claude Code to revoke $SEED_ID ---"
+echo "--- Running claude -p (delete_override, expect the retired write) ---"
 run_claude_with_tool "__delete_override" "$PROMPT" "$OUTPUT_FILE"
-
-errors=0
 
 if assert_tool_invoked "$OUTPUT_FILE" "__delete_override"; then
   echo "PASS: agent invoked __delete_override"
@@ -65,41 +47,31 @@ else
   echo "FAIL: agent did not invoke __delete_override"
   errors=$((errors + 1))
 fi
+assert_override_frozen_text "delete_override through Claude Code" \
+  "$(tool_result_is_error "$OUTPUT_FILE" "__delete_override")" \
+  "$(tool_result_text "$OUTPUT_FILE" "__delete_override")" || errors=$((errors + 1))
 
-if assert_tool_result_present "$OUTPUT_FILE"; then
-  echo "PASS: MCP runtime returned a tool_result (live stack answered)"
+SMOKE=$(smoke_line "$OUTPUT_FILE")
+if [ "$(printf '%s' "$SMOKE" | jq -r '.frozen // empty' 2>/dev/null)" = "true" ]; then
+  echo "PASS: the agent's final message reports the retired write ($SMOKE)"
 else
-  echo "FAIL: no tool_result captured"
+  echo "FAIL: the agent's final message did not report frozen:true (SMOKE_RESULT: ${SMOKE:-<none>})"
   errors=$((errors + 1))
 fi
 
-# Outcome assertion — server-side state must reflect the revocation.
-# This is the meaningful check: dispatch is necessary but not sufficient.
-SERVER_STATE=$(curl -s -X GET \
-  -H "$AXONFLOW_AUTH_HDR" \
-  -H "X-Tenant-ID: local-dev-org" \
-  "$AXONFLOW_ENDPOINT/api/v1/overrides?include_revoked=true" \
-  | jq -r --arg id "$SEED_ID" '.overrides[]? | select(.id == $id) | .revoked_at // ""')
-
-if [ -n "$SERVER_STATE" ] && [ "$SERVER_STATE" != "null" ]; then
-  echo "PASS: server-side state shows override $SEED_ID revoked at $SERVER_STATE — outcome verified"
+AFTER=$(mcp_override_count)
+if [ -n "$BASELINE" ] && [ "$AFTER" = "$BASELINE" ]; then
+  echo "PASS: list_overrides count unchanged ($BASELINE -> $AFTER)"
 else
-  echo "FAIL: server-side state shows override $SEED_ID NOT revoked"
-  echo "      include_revoked=true result: $SERVER_STATE"
-  errors=$((errors + 1))
-fi
-
-if assert_result_contains "$OUTPUT_FILE" "SMOKE_RESULT:"; then
-  echo "PASS: agent emitted SMOKE_RESULT marker"
-else
-  echo "FAIL: agent did not emit SMOKE_RESULT marker"
+  echo "FAIL: list_overrides count moved or was unreadable (${BASELINE:-<none>} -> ${AFTER:-<none>})"
   errors=$((errors + 1))
 fi
 
 if [ "$errors" -gt 0 ]; then
   echo ""
-  echo "FAIL: $errors outcome-test assertion(s) failed (output: $OUTPUT_FILE)"
+  echo "FAIL: $errors assertion(s) failed (output: $OUTPUT_FILE)"
+  trap - EXIT
   exit 1
 fi
 echo ""
-echo "PASS: revoke-override outcome — agent dispatched, platform revoked the override, server state confirmed"
+echo "PASS: revoke-override — the platform and Claude Code both answer the retired write"

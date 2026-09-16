@@ -10,8 +10,11 @@
 # typically asked precisely when the agent isn't reachable yet.
 #
 # Per HARD RULE #0: this drives the REAL `claude` CLI with the plugin
-# loaded against a real AxonFlow agent (community-saas at
-# try.getaxonflow.com when nothing else is configured). The stream-json
+# loaded against a real AxonFlow agent: the one AXONFLOW_ENDPOINT names
+# (http://localhost:8080 by default, runtime-e2e/_lib/claude-runtime.sh).
+# Production Community SaaS is never a default: the plugin's hooks register a
+# tenant there on first use, so against https://try.getaxonflow.com the suite
+# SKIPs unless AXONFLOW_E2E_ALLOW_PRODUCTION=1 is set for the run. The stream-json
 # output is parsed to confirm:
 #
 #   1. Some tool was invoked (the agent didn't refuse to act).
@@ -41,15 +44,11 @@ UTC_TS=$(date -u +%Y%m%dT%H%M%SZ)
 EVIDENCE="$SCRIPT_DIR/EVIDENCE/$UTC_TS"
 mkdir -p "$EVIDENCE"
 
-# Default to the public Community SaaS endpoint so the test runs against
-# real infrastructure when the operator hasn't configured anything else.
-# The shared lib defaults AXONFLOW_ENDPOINT to http://localhost:8080;
-# override here ONLY when nothing was set externally.
-if [ -z "${AXONFLOW_ENDPOINT_OVERRIDE_DONE:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
-  AXONFLOW_ENDPOINT="${AXONFLOW_ENDPOINT:-https://try.getaxonflow.com}"
-  export AXONFLOW_ENDPOINT
-  export AXONFLOW_ENDPOINT_OVERRIDE_DONE=1
-fi
+# The shared lib defaults AXONFLOW_ENDPOINT to http://localhost:8080. This
+# suite used to carry a production fallback here, which never took effect
+# (the lib had already set the endpoint); it is removed.
+export AXONFLOW_ENDPOINT
+runtime_e2e_refuse_production "$AXONFLOW_ENDPOINT" "loads the plugin, whose hooks register a Community SaaS tenant on first use"
 
 runtime_e2e_skip_if_unavailable
 

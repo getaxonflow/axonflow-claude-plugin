@@ -1,17 +1,18 @@
 ---
-description: Create a governed AxonFlow session override with mandatory justification (TTL clamped server-side; critical-risk policies blocked)
+description: Explain that AxonFlow session overrides are retired from v11.0.0 (create_override answers LEGACY_POLICY_WRITE_FROZEN) and what changes a verdict instead
 argument-hint: <policy-id> <static|dynamic> <reason>
 ---
 
-Create a session override against an AxonFlow policy that would otherwise deny.
+The user asked to create a session override against an AxonFlow policy.
 
 Arguments: $ARGUMENTS
 
-Parse the arguments as `<policy_id> <policy_type> <reason...>`. If any are missing, ask the user for them — `policy_id`, `policy_type` (`static` or `dynamic`), and a free-text `override_reason` are all mandatory.
+**Session overrides are retired from AxonFlow v11.0.0.** The platform still lists the `create_override` MCP tool, but it no longer creates an override: it answers with a tool error whose text begins `LEGACY_POLICY_WRITE_FROZEN: `. On a session the platform cannot attribute to an individual user, it refuses for that reason first. Either way, no override changes a verdict.
 
-Then call the `create_override` MCP tool. The platform may return HTTP 403 if:
+Do not tell the user that the blocked tool call will succeed on a retry. Instead:
 
-- The policy is critical-risk (no override permitted)
-- The policy has `allow_override: false`
+1. If the user has the `decision_id` from the block, use `/axonflow-explain-decision` to show which policy fired and why.
+2. Tell the user what changes a verdict from v11.0.0: an administrator enables, disables or re-actions the policy in the organization's typed policy document (a shipped system control is in its `system_controls` section), through the typed authoring route `/api/v1/typed-policies`.
+3. If the user asks you to call `create_override` anyway, you may. Report its answer verbatim: it states the retirement.
 
-Surface the response's `id`, `expires_at`, and any `clamped` flag (meaning the requested TTL was clamped down). Tell the user: "Override `<id>` active until `<expires_at>` — the next attempt at the previously-blocked tool call will succeed within that window."
+On an AxonFlow platform older than v11.0.0 the tool still creates time-bounded session overrides; the platform's answer tells you which one you are talking to.

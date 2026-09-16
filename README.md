@@ -25,7 +25,7 @@ The gaps start surfacing the moment Claude Code moves from one developer's lapto
 | SQL-injection detection on MCP queries | MCP server's problem | **30+ patterns evaluated on every MCP tool call** |
 | Compliance-grade audit trail | Session logs, not compliance-formatted | **Every governed call recorded with policies, decision, duration** |
 | Decision explainability after a block | Generic hook failure message | **`decision_id` surfaced in deny reason; `explain_decision` MCP tool returns the full record** |
-| Self-service, time-bounded exceptions | Not available | **`create_override` with mandatory justification, fully audited** |
+| A governed call when AxonFlow cannot decide | Not addressed | **A rejected credential, a limit or a refusal blocks; an unreachable agent is never silent ([posture](#when-axonflow-cannot-decide))** |
 | Cloud metadata / SSRF / path traversal blocking | Not addressed | **Built in** |
 
 You get all of that with zero change to how developers use Claude Code. Hooks fire automatically, the deny message tells you why, MCP tools are there when you want to investigate or unblock yourself.
@@ -41,8 +41,8 @@ Claude selects a tool (Bash, Write, Edit, NotebookEdit, mcp__*)
 PreToolUse hook fires automatically
     │ → check_policy("claude_code.Bash", "rm -rf /")
     │
-    ├─ BLOCKED → Claude receives denial reason with decision_id + risk_level,
-    │            can call explain_decision / create_override to unblock
+    ├─ BLOCKED → Claude receives denial reason with decision_id,
+    │            can call explain_decision to see which policy fired
     │
     └─ ALLOWED → Tool executes normally
                       │
@@ -58,10 +58,7 @@ PreToolUse hook fires automatically
 
 **Governed tools:** `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP server tools (`mcp__*`). Read-only tools (`Read`, `Glob`, `Grep`) are not governed by default — they don't modify state or send data externally.
 
-**Fail behavior:**
-- AxonFlow unreachable (network) → fail-open, tool execution continues
-- AxonFlow auth/config error → fail-closed, tool call denied until config is fixed
-- PostToolUse failures → never block (audit and PII scan are best-effort)
+**When AxonFlow cannot decide:** a rejected credential, a limit or a refusal blocks the tool call; an unreachable agent lets it run with a notice you see, or blocks it under `AXONFLOW_FAIL_MODE=closed`. PostToolUse never blocks. The full table is in [When AxonFlow cannot decide](#when-axonflow-cannot-decide).
 
 ---
 
@@ -77,7 +74,7 @@ A developer connects an MCP server to a production database for debugging. Claud
 
 A developer types *"fix the database issue."* Claude Code picks a `Bash` tool and runs a migration against prod. The command ran because nothing stopped it.
 
-**With the plugin:** a dynamic policy scoped to production patterns matches, the call is denied with a decision ID, and Claude surfaces the deny reason in the REPL. A developer can call `explain_decision` to see exactly which policy family triggered, then `create_override` with justification if they have the authority — all without leaving the session.
+**With the plugin:** a dynamic policy scoped to production patterns matches, the call is denied with a decision ID, and Claude surfaces the deny reason in the REPL. A developer can call `explain_decision` to see exactly which policy family triggered, without leaving the session; changing the verdict is an administrator's edit to the organization's policy.
 
 ### 3. The security-review block
 
@@ -89,11 +86,7 @@ A team wants to deploy Claude Code at scale and security says no: *"No policy en
 
 ## Take a governed plugin rollout into production
 
-Solo developers and self-serve teams can use the free 90-day [Plugin Evaluation License](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval) to validate hook behavior, policy packs, and override workflows.
-
-Organizations with a dated production requirement, written controls, an executive sponsor, and a technical owner can use AxonFlow's paid [Production Program](https://getaxonflow.com/design-partner?utm_source=readme_plugin_claude). It takes one scoped workflow into production over 60 or 75 days with Enterprise access, founder-led rollout support, upfront conversion pricing, and a fixed decision date.
-
-Public Design Partner pricing starts at $2,000; the Confidential Paid Pilot starts at $4,000. Prices are subject to eligibility and a signed agreement.
+Solo developers and self-serve teams can use the free 90-day [Plugin Evaluation License](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval) to validate hook behavior and policy packs.
 
 ### See AxonFlow in Action
 
@@ -116,9 +109,8 @@ Outgrown Community on a real plugin install? Evaluation unlocks the capacity and
 | HITL approval gates | — | 25 pending, 24h expiry | Unlimited, 24h |
 | Evidence export (CSV/JSON) | — | 5,000 records · 14d window · 3/day | Unlimited |
 | Policy simulation | — | 300/day | Unlimited |
-| Session overrides (self-service unblock) | — | — | Enterprise-only |
 
-Org-wide policies and session overrides are **Enterprise-only** — those are the actual upgrade triggers for plugin users.
+Org-wide policies are **Enterprise-only**, the actual upgrade trigger for plugin users. Session overrides are retired from AxonFlow v11.0.0 in every edition (see [the MCP tools](#decision-explainability--session-overrides-4)).
 
 [Get a free Plugin Evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval)
 
@@ -239,7 +231,7 @@ When the plugin's hooks hit a Free-tier cap (200 events/day, 2 active custom pol
 [AxonFlow] Upgrade: https://buy.stripe.com/bJe28qbztcdVchjdkw8k800
 ```
 
-The plugin also stamps a local back-off file from the response's `Retry-After` header so subsequent governed calls fall through immediately (no thundering herd against the agent) until the cap clears. The upgrade nudge is shown at most once per UTC day so it doesn't spam every hook.
+The plugin also stamps the shared back-off file (below). A request-rate limit (`daily_quota`, `per_minute`) blocks governed calls locally, with no request sent, for at most 300 seconds after it was stamped; then the plugin asks the platform again, which answers the limit again if it still holds. A feature or object-count limit (`feature_pro_only`, `active_policies`, `hitl_approvals_window`, `decision_list_size`) shows its nudge and blocks nothing beyond the call it answered. The upgrade nudge is shown at most once per UTC day so it doesn't spam every hook.
 
 ---
 
@@ -443,9 +435,9 @@ In addition to automatic hooks, the agent's MCP server exposes **15 tools** Clau
 | Tool | Purpose |
 |------|---------|
 | `explain_decision` | Return the full [DecisionExplanation](https://docs.getaxonflow.com/docs/governance/explainability/) for a decision ID |
-| `create_override` | Create a time-bounded, audit-logged session override (mandatory justification) |
-| `delete_override` | Revoke an active session override |
-| `list_overrides` | List active overrides scoped to the caller's tenant |
+| `create_override` | **Retired from AxonFlow v11.0.0**: answers a tool error beginning `LEGACY_POLICY_WRITE_FROZEN: ` and creates nothing |
+| `delete_override` | **Retired from AxonFlow v11.0.0**: answers the same tool error |
+| `list_overrides` | List the overrides recorded for the caller's tenant (an unchanged read; from v11.0.0 an override changes no verdict) |
 
 ### Tenant identity & tier capability (5 — V1 Plugin Pro)
 
@@ -459,9 +451,32 @@ In addition to automatic hooks, the agent's MCP server exposes **15 tools** Clau
 
 When a Free-tier cap is hit on these tools, the agent returns a structured upgrade envelope (same shape as the 429 daily-quota envelope) and the plugin surfaces the upgrade prompt to stderr — see [Free-tier limits and upgrade prompts](#free-tier-limits-and-upgrade-prompts).
 
-**The inline-unblock workflow:** a policy block → the deny reason includes `decision_id` and `risk_level` → the developer asks Claude to call `explain_decision` → if the decision is overridable, `create_override` unblocks with justification. No separate admin surface, full audit trail.
+**After a block:** the deny reason includes the `decision_id`; the developer asks Claude to call `explain_decision` to see which policy fired and why. **Session overrides are retired from AxonFlow v11.0.0:** no override changes a verdict, and a retry does not succeed because one was requested. What changes a verdict is an administrator's edit to the policy in the organization's typed policy document (a shipped system control is in its `system_controls` section), through `/api/v1/typed-policies`. The `create-override` and `revoke-override` skills explain this instead of promising an unblock.
 
-See [Session Overrides](https://docs.getaxonflow.com/docs/governance/overrides/).
+---
+
+## When AxonFlow cannot decide
+
+Every governed call gets one of these answers. PreToolUse blocks through Claude Code's structured deny (`permissionDecision: "deny"`, the reason shown in the session). A notice that lets the call run goes in the hook JSON's `systemMessage`, which Claude Code shows you: Claude Code does not show a hook's stderr when the hook succeeds, so a stderr-only warning would be silent. PostToolUse never blocks; when it could not check an output it tells Claude not to use it (a governance alert) or passes it with a notice.
+
+| AxonFlow's answer | PreToolUse | PostToolUse |
+|---|---|---|
+| A policy decision (a JSON-RPC result on any HTTP status but 401 and 429) | as decided: a deny blocks | a deny or a redaction is a governance alert |
+| A result that decides nothing (no boolean `allowed`, or `isError`) | **blocked** | alert |
+| **HTTP 401**, with or without a per-user token, and the cooldown it starts | **blocked**, quoting the agent; the cooldown blocks locally for `AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS` (300 by default), naming the seconds left and the file to delete | alert |
+| A JSON-RPC `-32001` answer on any HTTP status but 429, with `AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1` (or `true`) | **runs ungoverned**, with a notice naming the switch | alert naming the switch |
+| **HTTP 429**, with or without the Free-tier envelope, and a request-rate limit stamp | **blocked**, the limit named | alert |
+| A refusal: a redirect, a 4xx other than 408 without a decision (402 and 413 included), a JSON-RPC error other than `-32603` / `-32700` | **blocked** | alert |
+| The check request could not be built | **blocked** | alert |
+| **No usable answer**: unreachable, timeout, 408, 5xx, `-32603` / `-32700`, an empty or unreadable body, not exactly one JSON document, `jq` or `curl` missing, and Community SaaS with no credential because the registration did not complete (no request is sent and no stamp written) | `AXONFLOW_FAIL_MODE` unset, empty or `open`: **runs**, with a `GOVERNANCE UNAVAILABLE` notice. Any other value: **blocked** | `open`: passes with the notice. Otherwise: alert |
+| `scripts/lib/failure-posture.sh` missing (a broken install) | **blocked**, naming the file | alert, naming it |
+
+- **`AXONFLOW_FAIL_MODE=open|closed`** decides only the no-usable-answer row. It is read case-insensitively, and any value other than unset, empty or `open` blocks, so a typo fails safe. It never loosens a 401, a 429, a refusal or a policy deny.
+- **`AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR=1`** is an operator's break-glass for a `-32001` authentication error while a credential is being fixed. It is off by default, it covers only a single `-32001` answer, on any HTTP status but 429 (never a plain 401, a body of more than one JSON document, or the cooldown), and it stamps no cooldown; every call it lets through carries a notice naming it. The post hook does not run ungoverned under it: Claude is still told not to use the unchecked output, in an alert that names the switch. **On a community AxonFlow v11.0.0 agent the only live `-32001` is the MCP server's refusal of a client id the organization has not admitted** (once it has admitted its service-principal ceiling), so this switch lets an UNADMITTED client run ungoverned. The Codex plugin has no such switch; this one is Claude Code-only.
+- **The shared back-off file** is `${XDG_CACHE_HOME:-$HOME/.cache}/axonflow/throttle-until`, one line, `<epoch> <limit_type>`. The Claude Code, Cursor and Codex hooks (and, on Linux, the OpenClaw plugin) read and write the same file, so a stamp written by one plugin can block another. This plugin honours an `auth_failure` stamp for its own configured cooldown (`AXONFLOW_AUTH_FAILURE_COOLDOWN_SECONDS`, 300 seconds by default) after the file was written, whatever deadline the file carries, and a request-rate limit (`daily_quota`, `per_minute`) for at most 300 seconds after it was written (a stamp written more than 60 seconds in the future counts as past that); any other stamp blocks nothing here and is left on disk for the plugin that wrote it. The file is removed when its deadline passes. After fixing a credential, delete it to retry at once.
+- **Nothing is skipped for lack of content.** A call whose input has nothing to check (an MCP call with no arguments, a NotebookEdit delete, an empty command) is checked as the tool's name plus the input's plain fields.
+- **The audit record** a PostToolUse call sends carries `success` only when Claude Code said how the tool ended (a numeric `exitCode` or a boolean `success` in its response). Claude Code's Bash, Write and Edit responses carry neither, so those records carry no `success` field rather than claiming one.
+- **An unreachable agent is never silent,** and a governed call on an unreachable agent is not a governed call: set `AXONFLOW_FAIL_MODE=closed` where running ungoverned is not acceptable.
 
 ---
 
@@ -525,11 +540,16 @@ axonflow-claude-plugin/
 
 # Smoke E2E against a live AxonFlow at localhost:8080
 bash tests/e2e/smoke-block-context.sh
+
+# The failure posture, with the real hook scripts, against a live AxonFlow
+bash runtime-e2e/hook-failure-posture/test.sh
 ```
 
-The smoke scenario installs the plugin's `pre-tool-check.sh` against a running platform, feeds a SQLi-bearing Bash tool invocation through it, and asserts the hook returns the `permissionDecision: deny` shape with the richer-context markers (`decision:`, `risk:`) in the reason text. Exits 0 with `SKIP:` if no stack is reachable. Run in CI via `workflow_dispatch` when a reachable endpoint is configured.
+The smoke scenario feeds a destructive Bash command (`rm -rf / --no-preserve-root`), in the hook JSON Claude Code sends, through the plugin's `pre-tool-check.sh` against a running platform, and asserts the `permissionDecision: deny` shape naming the policy violation and the decision id. Exits 0 with `SKIP:` if no stack is reachable. Run in CI via `workflow_dispatch` when a reachable endpoint is configured.
 
-For the broader validation story — explain-decision, override lifecycle, audit-filter parity, cache invalidation — see the [Claude Code integration guide](https://docs.getaxonflow.com/docs/integration/claude-code/) and the [governance test scenarios](https://docs.getaxonflow.com/docs/testing/) documentation.
+No test or suite in this repository targets production Community SaaS by default: the ones that would write there SKIP unless `AXONFLOW_E2E_ALLOW_PRODUCTION=1` is set for the run.
+
+For the broader validation story — explain-decision, audit-filter parity, cache invalidation — see the [Claude Code integration guide](https://docs.getaxonflow.com/docs/integration/claude-code/) and the [governance test scenarios](https://docs.getaxonflow.com/docs/testing/) documentation.
 
 ---
 

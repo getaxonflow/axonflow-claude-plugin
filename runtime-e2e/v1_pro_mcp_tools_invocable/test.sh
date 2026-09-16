@@ -19,6 +19,12 @@
 # stream-json capture per. Per HARD RULE #0 — real plugin in real
 # host CLI; no fixtures, no shims.
 #
+# NEVER A DEFAULT TARGET: PRODUCTION. With AGENT_URL unset the suite SKIPs.
+# Against https://try.getaxonflow.com it registers a tenant, creates a tenant
+# policy on it and deletes that tenant's HITL and policy rows through AWS, so
+# it SKIPs there unless AXONFLOW_E2E_ALLOW_PRODUCTION=1 is set for the run
+# (runtime-e2e/_lib/claude-runtime.sh, runtime_e2e_refuse_production).
+#
 # Pre-requirements:
 #   - claude CLI on PATH (verified via runtime_e2e_skip_if_unavailable)
 #   - jq on PATH
@@ -40,7 +46,12 @@ UTC_TS=$(date -u +%Y%m%dT%H%M%SZ)
 EVIDENCE="$SCRIPT_DIR/EVIDENCE/$UTC_TS"
 mkdir -p "$EVIDENCE"
 
-AGENT_URL="${AGENT_URL:-https://try.getaxonflow.com}"
+AGENT_URL="${AGENT_URL:-}"
+if [ -z "$AGENT_URL" ]; then
+  echo "SKIP: AGENT_URL is not set (this suite has no default target; see the header)"
+  exit 0
+fi
+runtime_e2e_refuse_production "$AGENT_URL" "registers a tenant, creates a tenant policy on it and deletes that tenant's rows through AWS"
 export AXONFLOW_ENDPOINT="$AGENT_URL"
 
 runtime_e2e_skip_if_unavailable

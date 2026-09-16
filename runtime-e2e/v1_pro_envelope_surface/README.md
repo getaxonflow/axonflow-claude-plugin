@@ -90,12 +90,16 @@ intact so the AWS CLI continues to find the operator's credentials for
 the ECS-exec preflight + DB seeding. The synthetic tenant + its
 `daily_usage` row are dropped on cleanup.
 
+> **Never a default target: production.** Production Community SaaS (`https://try.getaxonflow.com`) is live state. This suite SKIPs there unless `AXONFLOW_E2E_ALLOW_PRODUCTION=1` is set for the run, and it has no default target at all when `AGENT_URL` is unset (`runtime_e2e_refuse_production` in `runtime-e2e/_lib/claude-runtime.sh`; axonflow-enterprise#4249, comment 5684192928).
+
 ## Skip conditions
 
 - `curl`, `jq`, `aws`, `openssl`, `python3` missing → SKIP.
 - `python3` `bcrypt` module not installed → SKIP (used by
   `db_register_tenant` to mint the bcrypt(cost=12) hash that matches
   `platform/agent/community_saas_register.go`).
+- `AGENT_URL` unset → SKIP (no default target).
+- `AGENT_URL` is production `https://try.getaxonflow.com` and `AXONFLOW_E2E_ALLOW_PRODUCTION` is not `1` → SKIP. There the suite inserts a synthetic tenant into the stack's database through `aws ecs execute-command` and deletes its rows on exit.
 - `${AGENT_URL}/health` not reachable → SKIP.
 - Stack auto-discovery returned nothing (CI without IAM access) → SKIP.
 - `db_helpers.sh` not present at `../axonflow-enterprise/runtime-e2e/v1_paid_tier_staging/lib/db_helpers.sh`
@@ -104,7 +108,12 @@ the ECS-exec preflight + DB seeding. The synthetic tenant + its
 ## Usage
 
 ```bash
-AGENT_URL=https://try.getaxonflow.com bash runtime-e2e/v1_pro_envelope_surface/test.sh
+# A Community SaaS stack you own (an on-demand staging stack):
+AGENT_URL=https://try-staging.getaxonflow.com bash runtime-e2e/v1_pro_envelope_surface/test.sh
+
+# Production, deliberately (writes to the production database):
+AXONFLOW_E2E_ALLOW_PRODUCTION=1 AGENT_URL=https://try.getaxonflow.com \
+  bash runtime-e2e/v1_pro_envelope_surface/test.sh
 ```
 
 Evidence is captured under

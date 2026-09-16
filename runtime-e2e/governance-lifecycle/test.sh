@@ -1,30 +1,18 @@
 #!/usr/bin/env bash
-# Claude Code runtime E2E: full W2 governance lifecycle (rule #1 + integration)
+# Claude Code runtime E2E: the governance tools in one session, on AxonFlow
+# v11.0.0, where session overrides are retired.
 #
-# Drives a real Claude Code agent through the W2 read AND write features
-# in one session, in a sequence that mirrors how a user actually uses them:
+# One Claude Code session runs, in order:
+#   1. list_overrides      the count before
+#   2. create_override     answers the retired write (LEGACY_POLICY_WRITE_FROZEN)
+#   3. list_overrides      the count after: unchanged
+#   4. delete_override     answers the retired write
+#   5. search_audit_events the audit read still answers
 #
-#   1. list_overrides    — "what overrides are currently active?" (baseline)
-#   2. create_override   — "create an override for policy X with reason Y"
-#   3. list_overrides    — "list again, confirm the new one is there"
-#   4. delete_override   — "revoke override <id>"
-#   5. list_overrides    — "list one more time, confirm it's gone"
-#   6. search_audit_events — "show me the audit trail of what just happened"
-#
-# Why this exists alongside the per-feature tests
-#
-# Per-feature tests prove each tool dispatches through the runtime in
-# isolation. This integration test proves the FIVE FEATURES COHERE — an
-# override created via create_override actually shows up in
-# list_overrides, can be revoked via delete_override, and disappears
-# from list_overrides afterward. That's the truer "agent can do
-# everything around governance" claim that the W2 release tells users
-# they can rely on.
-#
-# Outcome assertions: state transitions, not just dispatch. The override
-# count must go up by 1, then back down. The override id captured in
-# step 2 must equal the id revoked in step 4. The audit trail in step
-# 6 must contain the override_created and override_revoked events.
+# Outcome assertions: every tool was invoked; both writes' tool_results are
+# the retired-write tool error; both counts equal the platform's own count,
+# read directly before and after the session; and the agent's final message
+# reports the same. Stack posture: AXONFLOW_TRUST_IDENTITY_HEADERS=true.
 
 set -uo pipefail
 
@@ -34,101 +22,24 @@ source "$SCRIPT_DIR/../_lib/claude-runtime.sh"
 
 runtime_e2e_skip_if_unavailable
 
-AXONFLOW_AUTH_HDR="Authorization: Basic $(printf '%s:%s' "$AXONFLOW_CLIENT_ID" "$AXONFLOW_CLIENT_SECRET" | base64)"
+errors=0
+BASELINE=$(mcp_override_count)
+echo "--- list_overrides count before: ${BASELINE:-<none>} ---"
 
-# Pick a system policy that allows override. sys_pii_email is medium-severity
-# (per migration 076 + 070 mapping it stays at risk_level='medium',
-# allow_override=TRUE). The lifecycle works on community-mode without an
-# Evaluation license because system policies are seeded by migration 031.
-TEST_POLICY_ID="sys_pii_email"
-TEST_POLICY_TYPE="static"
-
-# Sanity: confirm the policy exists and is overridable in this stack BEFORE
-# driving the agent. If the seed has drifted, fail fast with a clear message
-# rather than letting the agent encounter a confusing 403/404.
-POLICY_PROBE=$(curl -s -X POST \
-  -H "$AXONFLOW_AUTH_HDR" \
-  -H "Content-Type: application/json" \
-  -H "X-Tenant-ID: local-dev-org" \
-  -H "X-User-Email: dev@getaxonflow.com" \
-  -d "{\"policy_id\":\"$TEST_POLICY_ID\",\"policy_type\":\"$TEST_POLICY_TYPE\",\"override_reason\":\"lifecycle-prereq-probe\",\"ttl_seconds\":60}" \
-  -w "\nHTTP_STATUS:%{http_code}" \
-  "$AXONFLOW_ENDPOINT/api/v1/overrides")
-PROBE_STATUS=$(printf '%s' "$POLICY_PROBE" | sed -n 's/^HTTP_STATUS://p')
-PROBE_BODY=$(printf '%s' "$POLICY_PROBE" | sed '$d')
-case "$PROBE_STATUS" in
-  201)
-    PROBE_ID=$(printf '%s' "$PROBE_BODY" | jq -r '.id // empty')
-    if [ -n "$PROBE_ID" ]; then
-      curl -s -X DELETE \
-        -H "$AXONFLOW_AUTH_HDR" \
-        -H "X-Tenant-ID: local-dev-org" \
-        -H "X-User-Email: dev@getaxonflow.com" \
-        "$AXONFLOW_ENDPOINT/api/v1/overrides/$PROBE_ID" >/dev/null
-    fi
-    ;;
-  *)
-    require_override_preflight "$PROBE_STATUS" "$PROBE_BODY" \
-      "Probe policy was $TEST_POLICY_ID — it may also have drifted."
-    exit 1
-    ;;
-esac
-
-# Capture baseline override count so we can assert state transitions later.
-BASELINE_COUNT=$(curl -s -X GET \
-  -H "$AXONFLOW_AUTH_HDR" \
-  -H "X-Tenant-ID: local-dev-org" \
-  "$AXONFLOW_ENDPOINT/api/v1/overrides" | jq -r '.count // 0')
-echo "--- Baseline override count: $BASELINE_COUNT ---"
-
-REASON_TAG="lifecycle-test-$(date +%s)-$RANDOM"
-
-PROMPT="You are running a 6-step governance lifecycle smoke test against the axonflow MCP server. Execute each step in order using the named MCP tool — do not invent tools or reorder steps.
-
-Step 1: Call list_overrides with no arguments. Note the count value in the response.
-
-Step 2: Call create_override with policy_id=\"$TEST_POLICY_ID\", policy_type=\"$TEST_POLICY_TYPE\", and override_reason=\"$REASON_TAG\". Capture the id in the response — call it CREATED_ID.
-
-Step 3: Call list_overrides again with no arguments. Verify CREATED_ID is in the overrides array. Note the new count value.
-
-Step 4: Call delete_override with override_id=CREATED_ID.
-
-Step 5: Call list_overrides one more time with no arguments. Verify CREATED_ID is no longer in the active overrides array.
-
-Step 6: Call search_audit_events with limit=20.
-
-Output exactly the literal text SMOKE_RESULT: followed by a single-line JSON summary including all the state you captured: {\"baseline_count\":N1,\"after_create_count\":N2,\"after_revoke_count\":N3,\"created_id\":\"...\",\"revoke_dispatched\":true|false}."
+PROMPT='Run these five steps in order with the named MCP tools from the axonflow MCP server. Do not skip or reorder steps.
+Step 1: call list_overrides with include_revoked=true and note its count.
+Step 2: call create_override with policy_id="sys_pii_email", policy_type="static", override_reason="runtime-e2e governance-lifecycle".
+Step 3: call list_overrides with include_revoked=true again and note its count.
+Step 4: call delete_override with override_id="00000000-0000-4000-8000-00000000e2e1".
+Step 5: call search_audit_events with limit=5.
+Then reply with exactly one line: SMOKE_RESULT: followed by a JSON object with the keys "count_before" and "count_after" (numbers from steps 1 and 3), "create_frozen" and "delete_frozen" (true when that tool answer text starts with LEGACY_POLICY_WRITE_FROZEN), and "audit_answered" (true when step 5 returned a result that is not an error).'
 
 OUTPUT_FILE=$(mktemp -t axonflow-claude-lifecycle.XXXXXX)
+trap 'rm -f "$OUTPUT_FILE"' EXIT
 
-# Best-effort cleanup of any override the agent created if the test fails
-# mid-chain. We match by reason tag — REASON_TAG is unique per run so this
-# can't accidentally revoke unrelated overrides on a stack with churn.
-cleanup() {
-  if [ -n "${REASON_TAG:-}" ]; then
-    LEAKED_IDS=$(curl -s -X GET \
-      -H "$AXONFLOW_AUTH_HDR" \
-      -H "X-Tenant-ID: local-dev-org" \
-      "$AXONFLOW_ENDPOINT/api/v1/overrides" \
-      | jq -r --arg t "$REASON_TAG" '.overrides[]? | select(.override_reason == $t) | .id' 2>/dev/null)
-    for lid in $LEAKED_IDS; do
-      curl -s -X DELETE \
-        -H "$AXONFLOW_AUTH_HDR" \
-        -H "X-Tenant-ID: local-dev-org" \
-        -H "X-User-Email: dev@getaxonflow.com" \
-        "$AXONFLOW_ENDPOINT/api/v1/overrides/$lid" >/dev/null 2>&1 || true
-    done
-  fi
-  rm -f "${OUTPUT_FILE:-}"
-}
-trap cleanup EXIT
-
-echo "--- Driving Claude Code through the full W2 lifecycle ---"
+echo "--- Driving Claude Code through the governance tools ---"
 run_claude_with_tool "__list_overrides" "$PROMPT" "$OUTPUT_FILE"
 
-errors=0
-
-# All four W2 read+write tool families must have been dispatched in this single session.
 for tool in __list_overrides __create_override __delete_override __search_audit_events; do
   if assert_tool_invoked "$OUTPUT_FILE" "$tool"; then
     echo "PASS: agent invoked $tool"
@@ -137,70 +48,57 @@ for tool in __list_overrides __create_override __delete_override __search_audit_
     errors=$((errors + 1))
   fi
 done
-
-# list_overrides should appear at least 3 times (steps 1, 3, 5).
-LIST_CALLS=$(jq -c 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and ((.name | endswith("__list_overrides"))))' \
+LIST_CALLS=$(jq -c 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and (.name | endswith("__list_overrides")))' \
   "$OUTPUT_FILE" 2>/dev/null | wc -l | tr -d ' ')
-if [ "$LIST_CALLS" -ge 3 ]; then
-  echo "PASS: agent called list_overrides $LIST_CALLS times (expect >=3 across steps 1/3/5)"
+if [ "$LIST_CALLS" -ge 2 ]; then
+  echo "PASS: agent called list_overrides $LIST_CALLS times (steps 1 and 3)"
 else
-  echo "FAIL: agent called list_overrides $LIST_CALLS times — chain broke before step 5"
+  echo "FAIL: agent called list_overrides $LIST_CALLS times; the chain broke before step 3"
   errors=$((errors + 1))
 fi
 
-# Outcome assertions on the SMOKE_RESULT JSON.
-SMOKE_LINE=$(jq -r 'select(.type=="result") | .result' "$OUTPUT_FILE" 2>/dev/null \
-  | grep -E "^SMOKE_RESULT:" | tail -1 | sed 's/^SMOKE_RESULT: *//')
-if [ -z "$SMOKE_LINE" ]; then
-  echo "FAIL: agent did not emit SMOKE_RESULT line"
+assert_override_frozen_text "create_override in the lifecycle" \
+  "$(tool_result_is_error "$OUTPUT_FILE" "__create_override")" \
+  "$(tool_result_text "$OUTPUT_FILE" "__create_override")" || errors=$((errors + 1))
+assert_override_frozen_text "delete_override in the lifecycle" \
+  "$(tool_result_is_error "$OUTPUT_FILE" "__delete_override")" \
+  "$(tool_result_text "$OUTPUT_FILE" "__delete_override")" || errors=$((errors + 1))
+if [ "$(tool_result_is_error "$OUTPUT_FILE" "__search_audit_events")" = "false" ] && \
+   [ -n "$(tool_result_text "$OUTPUT_FILE" "__search_audit_events")" ]; then
+  echo "PASS: search_audit_events answered a result"
+else
+  echo "FAIL: search_audit_events answered an error or nothing: $(tool_result_text "$OUTPUT_FILE" "__search_audit_events" | cut -c1-300)"
+  errors=$((errors + 1))
+fi
+
+AFTER=$(mcp_override_count)
+if [ -n "$BASELINE" ] && [ "$AFTER" = "$BASELINE" ]; then
+  echo "PASS: the platform's count did not move across the session ($BASELINE -> $AFTER)"
+else
+  echo "FAIL: the platform's count moved or was unreadable (${BASELINE:-<none>} -> ${AFTER:-<none>})"
+  errors=$((errors + 1))
+fi
+
+SMOKE=$(smoke_line "$OUTPUT_FILE")
+if [ -z "$SMOKE" ]; then
+  echo "FAIL: the agent's final message carried no SMOKE_RESULT"
   errors=$((errors + 1))
 else
-  BASE=$(printf '%s' "$SMOKE_LINE" | jq -r '.baseline_count // empty' 2>/dev/null)
-  AFTER_C=$(printf '%s' "$SMOKE_LINE" | jq -r '.after_create_count // empty' 2>/dev/null)
-  AFTER_R=$(printf '%s' "$SMOKE_LINE" | jq -r '.after_revoke_count // empty' 2>/dev/null)
-  CID=$(printf '%s' "$SMOKE_LINE" | jq -r '.created_id // empty' 2>/dev/null)
-
-  if [ -z "$BASE" ] || [ -z "$AFTER_C" ] || [ -z "$AFTER_R" ]; then
-    echo "FAIL: SMOKE_RESULT missing required fields. Got: $SMOKE_LINE"
-    errors=$((errors + 1))
+  expect=$(jq -nc --argjson b "${BASELINE:-null}" '{count_before: $b, count_after: $b, create_frozen: true, delete_frozen: true, audit_answered: true}')
+  got=$(printf '%s' "$SMOKE" | jq -c '{count_before, count_after, create_frozen, delete_frozen, audit_answered}' 2>/dev/null)
+  if [ "$got" = "$expect" ]; then
+    echo "PASS: the agent's final message reports the platform's state ($got)"
   else
-    if [ "$AFTER_C" -gt "$BASE" ]; then
-      echo "PASS: override count went UP after create ($BASE -> $AFTER_C)"
-    else
-      echo "FAIL: override count did not increase after create ($BASE -> $AFTER_C)"
-      errors=$((errors + 1))
-    fi
-
-    if [ "$AFTER_R" -lt "$AFTER_C" ]; then
-      echo "PASS: override count went DOWN after revoke ($AFTER_C -> $AFTER_R)"
-    else
-      echo "FAIL: override count did not decrease after revoke ($AFTER_C -> $AFTER_R)"
-      errors=$((errors + 1))
-    fi
-  fi
-
-  if [ -n "$CID" ]; then
-    # Independent server-side verification — confirm the id is gone from the
-    # active list (revoke worked end-to-end, not just dispatch).
-    SERVER_HAS_ID=$(curl -s -X GET \
-      -H "$AXONFLOW_AUTH_HDR" \
-      -H "X-Tenant-ID: local-dev-org" \
-      "$AXONFLOW_ENDPOINT/api/v1/overrides" | jq --arg id "$CID" '[.overrides[]? | select(.id == $id)] | length')
-    if [ "${SERVER_HAS_ID:-1}" = "0" ]; then
-      echo "PASS: server-side list_overrides confirms $CID is revoked (independent check)"
-    else
-      echo "FAIL: server-side list_overrides still shows $CID after revoke"
-      errors=$((errors + 1))
-    fi
+    echo "FAIL: the agent reported $got, expected $expect"
+    errors=$((errors + 1))
   fi
 fi
 
 if [ "$errors" -gt 0 ]; then
   echo ""
-  echo "FAIL: $errors lifecycle assertion(s) failed"
-  echo "      output: $OUTPUT_FILE"
+  echo "FAIL: $errors lifecycle assertion(s) failed (output: $OUTPUT_FILE)"
+  trap - EXIT
   exit 1
 fi
-
 echo ""
-echo "PASS: governance-lifecycle (full create→list→revoke→list→audit-search verified end-to-end)"
+echo "PASS: governance-lifecycle — the retired writes, the unchanged reads and the audit read, end to end"

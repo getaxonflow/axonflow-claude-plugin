@@ -32,7 +32,12 @@ if ! curl -sSf -o /dev/null --max-time 5 "$AXONFLOW_ENDPOINT/health"; then
 fi
 
 # Initialize MCP session
+# The session presents X-User-Email from initialize on: the platform binds the
+# session's identity when it is created, and create_override (5/7 below) is
+# refused for identity on a session that has none.
+: "${AXONFLOW_E2E_USER_EMAIL:=claude-runtime-e2e@axonflow-test.invalid}"
 INIT_RESP=$(curl -s -D /tmp/axonflow-mcp-headers.txt -X POST -H "Authorization: $AUTH" \
+  -H "X-User-Email: $AXONFLOW_E2E_USER_EMAIL" \
   -H "Content-Type: application/json" -H "Accept: application/json" \
   -H "MCP-Protocol-Version: 2025-06-18" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","clientInfo":{"name":"axonflow-claude-runtime-e2e","version":"1.0.0"},"capabilities":{}}}' \
@@ -49,11 +54,30 @@ echo "Session: $SESSION_ID"
 call_mcp() {
   local id="$1"
   local body="$2"
+  shift 2
   curl -s -X POST -H "Authorization: $AUTH" \
     -H "Content-Type: application/json" -H "Accept: application/json" \
     -H "MCP-Protocol-Version: 2025-06-18" \
     -H "Mcp-Session-Id: $SESSION_ID" \
-    -d "$body" "$MCP_URL"
+    "$@" -d "$body" "$MCP_URL"
+}
+
+# The session-override writes are retired from AxonFlow v11.0.0: with a
+# per-user identity, create_override and delete_override answer a tool error
+# (isError: true) whose text begins "LEGACY_POLICY_WRITE_FROZEN: ". Without a
+# per-user identity create_override is refused for identity first, so the
+# session and these calls present X-User-Email (honoured when the agent sets
+# AXONFLOW_TRUST_IDENTITY_HEADERS=true).
+assert_override_frozen() {
+  local label="$1" resp="$2" is_error text
+  is_error=$(printf '%s' "$resp" | jq -r '.result.isError // false' 2>/dev/null)
+  text=$(printf '%s' "$resp" | jq -r '.result.content[0].text // ""' 2>/dev/null)
+  if [ "$is_error" = "true" ] && [ "${text#LEGACY_POLICY_WRITE_FROZEN: }" != "$text" ]; then
+    echo "PASS: $label answered the retired write (LEGACY_POLICY_WRITE_FROZEN)"
+  else
+    echo "FAIL: $label did not answer a tool error beginning \"LEGACY_POLICY_WRITE_FROZEN: \" (isError=$is_error): $(printf '%s' "$resp" | cut -c1-400)"
+    errors=$((errors + 1))
+  fi
 }
 
 errors=0
@@ -102,26 +126,16 @@ else
   errors=$((errors + 1))
 fi
 
-# 5) create_override — missing override_reason → server-side validation error,
-#    not a transport error. The MCP layer wraps it as a tool result with isError.
-echo "--- 5/6 tools/call create_override (missing reason → server validation) ---"
-RESP=$(call_mcp 6 '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"create_override","arguments":{"policy_id":"sys_test_v1","policy_type":"static"}}}')
-if echo "$RESP" | grep '"jsonrpc"' >/dev/null; then
-  echo "PASS: create_override dispatched (server validation result returned)"
-else
-  echo "FAIL: create_override response malformed: $RESP"
-  errors=$((errors + 1))
-fi
+# 5) create_override — the retired write (it used to pass on any answer that
+#    contained "jsonrpc", which an error of any kind does).
+echo "--- 5/7 tools/call create_override (the retired write) ---"
+RESP=$(call_mcp 6 '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"create_override","arguments":{"policy_id":"sys_pii_email","policy_type":"static","override_reason":"runtime-e2e"}}}' -H "X-User-Email: $AXONFLOW_E2E_USER_EMAIL")
+assert_override_frozen "create_override" "$RESP"
 
-# 6) delete_override — non-existent id
-echo "--- 6/7 tools/call delete_override (nonexistent id) ---"
-RESP=$(call_mcp 7 '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"delete_override","arguments":{"override_id":"runtime-e2e-no-such-override"}}}')
-if echo "$RESP" | grep '"jsonrpc"' >/dev/null; then
-  echo "PASS: delete_override dispatched"
-else
-  echo "FAIL: delete_override response malformed: $RESP"
-  errors=$((errors + 1))
-fi
+# 6) delete_override — the retired write.
+echo "--- 6/7 tools/call delete_override (the retired write) ---"
+RESP=$(call_mcp 7 '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"delete_override","arguments":{"override_id":"runtime-e2e-no-such-override"}}}' -H "X-User-Email: $AXONFLOW_E2E_USER_EMAIL")
+assert_override_frozen "delete_override" "$RESP"
 
 # 7) list_recent_decisions (V1.1 #1982) — assert the over-cap path returns
 # the wrapped V1 envelope. limit=10 over Community max page=5 must come

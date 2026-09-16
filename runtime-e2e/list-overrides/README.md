@@ -1,19 +1,12 @@
 # list-overrides — runtime E2E
 
-**Asserts:** Claude Code dispatches `mcp__plugin_axonflow_axonflow__list_overrides` through its MCP runtime against the live stack. Empty-state success path: in community mode the response is `{overrides: [], count: 0}`. Agent reports the count downstream of the result via `SMOKE_RESULT:` marker.
+**Asserts:** `list_overrides` is an unchanged read on AxonFlow v11.0.0. The MCP and REST counts agree; Claude Code invokes `mcp__plugin_axonflow_axonflow__list_overrides`, its tool_result is a successful read carrying a count, and the agent's final message reports the platform's count. No override is seeded: none can be created on v11.0.0.
 
-**Prereqs:** `claude` CLI on PATH and authenticated; `jq`; live AxonFlow stack reachable at `$AXONFLOW_ENDPOINT`.
+**Prereqs:** `claude` CLI on PATH and authenticated; `jq`; a live AxonFlow v11.0.0 stack reachable at `$AXONFLOW_ENDPOINT` (never production: nothing here needs it). The suite presents `X-User-Email` through the plugin's MCP headersHelper (`AXONFLOW_USER_EMAIL`, default `claude-runtime-e2e@axonflow-test.invalid`) and on its own direct calls.
 
-**Required deployment posture:** the override endpoints are scoped to an individual user, so the AxonFlow **agent** must be forwarding a per-user identity. On a default deployment it is not: `AXONFLOW_TRUST_IDENTITY_HEADERS` defaults to **off** (since 9.9.0) and the agent strips `X-User-Email`, so `create_override` returns 401 and this test **fails** with the remediation printed (it used to skip silently and report green — #3062).
-
-```bash
-AXONFLOW_TRUST_IDENTITY_HEADERS=true   # on the AGENT, then restart it
-```
-
-Only enable it when every hop that can reach the agent asserts end-user identity from a validated source — see `docs/security/identity-header-trust.md` in axonflow-enterprise.
+**Required deployment posture:** `AXONFLOW_TRUST_IDENTITY_HEADERS=true` on the AxonFlow **agent**. The override writes are scoped to an individual user, and without a trusted per-user identity the platform refuses them for identity before it answers the retirement, which this suite reports as a failure with the remediation. Only enable it when every hop that can reach the agent asserts end-user identity from a validated source.
 
 **Run:**
 ```bash
-AXONFLOW_ENDPOINT=http://localhost:8080 \
-  bash runtime-e2e/list-overrides/test.sh
+AXONFLOW_ENDPOINT=http://localhost:8080 bash runtime-e2e/list-overrides/test.sh
 ```
