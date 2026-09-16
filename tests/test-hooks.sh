@@ -1481,6 +1481,37 @@ while True:
         fi
         rm -rf "$CACHE_DIR"
     done
+    # An exported SECONDS does not move the budget: the hooks count from their
+    # own start. SECONDS=99999 against a dead port: the check is still sent (the
+    # unreachable text), not the budget-exhausted row. SECONDS=-100 against the
+    # agent that never answers: the answer still arrives inside the timeout.
+    for secs_leg in pre:99999 post:99999 pre:-100; do
+        secs_hook="${secs_leg%%:*}"; secs="${secs_leg#*:}"
+        CACHE_DIR=$(mktemp -d -t axonflow-seconds.XXXXXX)
+        :
+        if [ "$secs" = "99999" ]; then SECS_EP="http://127.0.0.1:19999"; else SECS_EP="http://127.0.0.1:$HANG_PORT"; fi
+        if [ "$secs_hook" = "pre" ]; then SECS_HOOK="$PRE_HOOK"; SECS_IN="$FIXTURES/bash-pre.json"; else SECS_HOOK="$POST_HOOK"; SECS_IN="$FIXTURES/bash-post.json"; fi
+        run_timed "$SECS_HOOK" "$SECS_IN" AXONFLOW_ENDPOINT="$SECS_EP" AXONFLOW_TIMEOUT_SECONDS=60 SECONDS="$secs"
+        assert_within_hook_timeout "$secs_hook with SECONDS=$secs exported, AXONFLOW_TIMEOUT_SECONDS=60"
+        SECS_SEEN=$(cat "$CACHE_DIR/stdout" "$CACHE_DIR/stderr" 2>/dev/null)
+        if printf '%s' "$SECS_SEEN" | grep -F 'time budget ran out' >/dev/null; then
+            echo "  FAIL: $secs_hook with SECONDS=$secs exported → took the budget-exhausted row"
+            ((FAIL++)) || true
+        else
+            echo "  PASS: $secs_hook with SECONDS=$secs exported → not the budget-exhausted row"
+            ((PASS++)) || true
+        fi
+        if [ "$secs" = "99999" ]; then
+            if printf '%s' "$SECS_SEEN" | grep -F 'could not be reached' >/dev/null; then
+                echo "  PASS: $secs_hook with SECONDS=99999 exported → the check was sent (the agent could not be reached)"
+                ((PASS++)) || true
+            else
+                echo "  FAIL: $secs_hook with SECONDS=99999 exported → the check was not sent"
+                ((FAIL++)) || true
+            fi
+        fi
+        rm -rf "$CACHE_DIR"
+    done
     # A post hook with no output to scan exits at once, while its audit record
     # goes to the agent that never answers: the audit call must not hold the
     # hook's output open after the hook exits.
@@ -1634,13 +1665,14 @@ RECORDER
         case "$hook" in
             pre)
         assert_pre_runs_with_notice "pre, no credential after the bootstrap"
-        assert_contains "pre, no credential after the bootstrap → the notice names the registration" "$NOTICE" "registration has not completed"
+        assert_contains "pre, no credential after the bootstrap → the notice names the registration" "$NOTICE" "registration did not succeed"
                 ;;
             post)
         assert_post_notice "post, no credential after the bootstrap"
+        assert_contains "post, no credential after the bootstrap → the notice names the registration" "$NOTICE" "registration did not succeed"
                 ;;
             pre-flock)
-                assert_contains "pre, no credential, the bootstrap on its flock path → the hook's stderr still names it" "$STDERR_OUT" "registration has not completed"
+                assert_contains "pre, no credential, the bootstrap on its flock path → the hook's stderr still names it" "$STDERR_OUT" "registration did not succeed"
                 ;;
             closed)
         assert_pre_denied "pre, no credential after the bootstrap, AXONFLOW_FAIL_MODE=closed"

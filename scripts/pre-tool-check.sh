@@ -39,6 +39,11 @@
 
 # The script's directory from builtins only: this runs before the dependency
 # check below, on a PATH that may hold nothing but bash.
+# The time budget (scripts/lib/failure-posture.sh) counts bash's SECONDS from
+# here. SECONDS exported by the calling environment would otherwise move it:
+# a large value exhausts the budget before the check, a negative one lifts it.
+SECONDS=0
+
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
 if [ "$SCRIPT_DIR" = "${BASH_SOURCE[0]}" ]; then
   SCRIPT_DIR="."
@@ -437,7 +442,7 @@ fi
 # is sent (it could only be refused as a 401, which would stamp a cooldown and
 # name a variable the user never set), and no stamp is written.
 if [ "${AXONFLOW_MODE:-}" = "community-saas" ] && [ -z "$AUTH" ]; then
-  axonflow_pre_ungoverned "the AxonFlow Community SaaS registration has not completed, so there is no credential to ask the AxonFlow agent at ${ENDPOINT} with"
+  axonflow_pre_ungoverned "the AxonFlow Community SaaS registration did not succeed, so there is no credential to ask the AxonFlow agent at ${ENDPOINT} with (the agent was not asked)"
 fi
 
 REQUEST_TIMEOUT_SECONDS=$(axonflow_budget_timeout "$CONFIGURED_TIMEOUT_SECONDS" 1)
