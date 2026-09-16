@@ -114,18 +114,27 @@ JQ_FIELD_RE = re.compile(
 # Matches `$VAR" | jq -r '...'` or `$VAR | jq -r '...'`.
 # expr group is the jq filter text.
 
+RESULT_TEXT_RE = re.compile(
+    r"""(?<![A-Za-z0-9_])axonflow_result_text\s+["']?\$([A-Z_][A-Z0-9_]*)["']?\s+'(?P<expr>[^']+)'""",
+)
+# Matches `axonflow_result_text "$VAR" '...'`: the reader in
+# scripts/lib/failure-posture.sh runs `jq -r` with that filter on $VAR, so a
+# field read through it is a field read like any other. Without this pattern
+# the gate reported every field the hooks read through the reader as unread.
+
 LEAF_FIELD_RE = re.compile(r"\.([a-z_][a-zA-Z0-9_]*)")
 
 
 def discover_plugin_reads(scripts_dir: Path) -> dict[str, set[str]]:
-    """Scan bash scripts for `jq -r '.X'` accesses on MCP-result variables.
+    """Scan bash scripts for `jq -r '.X'` accesses on MCP-result variables,
+    written inline or through `axonflow_result_text`.
 
     Returns a dict {schema_name: set_of_field_names}.
     """
     reads: dict[str, set[str]] = {schema: set() for schema in MCP_RESULT_VARS.values()}
     for script in sorted(scripts_dir.glob("*.sh")):
         text = script.read_text()
-        for match in JQ_FIELD_RE.finditer(text):
+        for match in [*JQ_FIELD_RE.finditer(text), *RESULT_TEXT_RE.finditer(text)]:
             var = match.group(1)
             schema = MCP_RESULT_VARS.get(var)
             if schema is None:

@@ -31,6 +31,7 @@ jobs:
 
       - name: Shell syntax check
         run: |
+          bash -n scripts/lib/failure-posture.sh
           bash -n scripts/pre-tool-check.sh
           bash -n scripts/post-tool-audit.sh
           bash -n scripts/upgrade-prompt.sh
