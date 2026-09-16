@@ -103,7 +103,7 @@ if ! result_is_error_for "$B3"; then
   exit 1
 fi
 ERR_TEXT=$(echo "$B3" | jq -r '.result.content[]? | select(.type=="text") | .text // empty' 2>/dev/null)
-if echo "$ERR_TEXT" | grep -qiE 'upgrade|Pro|limit|cap|policy.*2'; then
+if echo "$ERR_TEXT" | grep -iE 'upgrade|Pro|limit|cap|policy.*2' >/dev/null; then
   echo "PASS: 3rd policy rejected with upgrade-aware error: $ERR_TEXT"
 else
   echo "FAIL: 3rd policy rejected but error message lacks upgrade context (need cap-specific wording for the user-facing envelope)"

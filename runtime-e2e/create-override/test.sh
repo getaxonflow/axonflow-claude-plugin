@@ -52,7 +52,7 @@ fi
 TOOL_RESULT_TEXT=$(jq -c 'select(.type=="user") | .message.content[]? | select(.type=="tool_result")' \
   "$OUTPUT_FILE" 2>/dev/null | jq -r '.. | strings? // empty' | tr '\n' ' ')
 
-if printf '%s' "$TOOL_RESULT_TEXT" | grep -q -E 'Critical-risk policies cannot be overridden|allow_override=false|cannot be session-overridden|403' ; then
+if printf '%s' "$TOOL_RESULT_TEXT" | grep -E 'Critical-risk policies cannot be overridden|allow_override=false|cannot be session-overridden|403' >/dev/null ; then
   echo "PASS: tool_result carries the platform 403 rejection (migration 076 enforcement reached the agent)"
 else
   echo "FAIL: tool_result did not carry the expected platform rejection"

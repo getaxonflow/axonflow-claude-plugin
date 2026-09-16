@@ -39,6 +39,13 @@ jobs:
           bash -n scripts/mcp-auth-headers.sh
           bash -n scripts/telemetry-ping.sh
 
+      # A `producer | grep -q` under pipefail can read a match as a miss. The
+      # guard proves itself on its fixtures first, then scans the repository.
+      - name: Guard - no grep -q under pipefail
+        run: |
+          chmod +x tests/no-grep-q-under-pipefail.sh
+          ./tests/no-grep-q-under-pipefail.sh
+
       - name: Run hook regression tests (mock server)
         run: |
           chmod +x tests/test-hooks.sh tests/test-pep-handshake.sh scripts/*.sh

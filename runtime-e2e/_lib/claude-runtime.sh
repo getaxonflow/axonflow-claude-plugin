@@ -96,7 +96,7 @@ assert_tool_result_succeeded() {
 assert_result_contains() {
   local output_file="$1"
   local needle="$2"
-  jq -r 'select(.type=="result") | .result' "$output_file" 2>/dev/null | grep -q "$needle"
+  jq -r 'select(.type=="result") | .result' "$output_file" 2>/dev/null | grep "$needle" >/dev/null
 }
 
 # ---------------------------------------------------------------------------

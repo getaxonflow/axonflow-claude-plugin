@@ -41,7 +41,7 @@ assert_eq() {
 
 assert_contains() {
     local desc="$1" haystack="$2" needle="$3"
-    if echo "$haystack" | grep -q "$needle"; then
+    if echo "$haystack" | grep "$needle" >/dev/null; then
         echo "  PASS: $desc"
         ((PASS++)) || true
     else
@@ -877,7 +877,7 @@ export AXONFLOW_CHECKPOINT_URL="http://127.0.0.1:$MOCK_PORT/v1/ping"
 "$TELEMETRY_SCRIPT" 2>/dev/null
 sleep 1
 STAMP_CONTENT=$(cat "$TEST_HOME/.cache/axonflow/claude-code-plugin-telemetry-sent" 2>/dev/null || echo "")
-if echo "$STAMP_CONTENT" | grep -qE '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'; then
+if echo "$STAMP_CONTENT" | grep -E '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' >/dev/null; then
     echo "  PASS: Stamp file contains UUID"
     ((PASS++)) || true
 else
@@ -989,14 +989,14 @@ BOOTSTRAP_OUT=$(
 )
 
 # The unsafe credential MUST NOT have been loaded into AXONFLOW_AUTH.
-if echo "$BOOTSTRAP_OUT" | grep -q "AUTH=${UNSAFE_AUTH}"; then
+if echo "$BOOTSTRAP_OUT" | grep "AUTH=${UNSAFE_AUTH}" >/dev/null; then
     echo "  FAIL: bootstrap loaded the 0644 registration file's credential"
     ((FAIL++)) || true
 else
     echo "  PASS: bootstrap did not load the world-readable credential"
     ((PASS++)) || true
 fi
-if echo "$BOOTSTRAP_OUT" | grep -q 'unsafe permissions'; then
+if echo "$BOOTSTRAP_OUT" | grep 'unsafe permissions' >/dev/null; then
     echo "  PASS: stderr warning emitted for unsafe permissions"
     ((PASS++)) || true
 else

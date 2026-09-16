@@ -276,13 +276,13 @@ else
   echo "FAIL: tampered token did not produce a deny: $DECISION"
   errors=$((errors + 1))
 fi
-if printf '%s' "$DECISION" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null | grep -q "per-user token"; then
+if printf '%s' "$DECISION" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null | grep "per-user token" >/dev/null; then
   echo "PASS: deny reason names the per-user token as a likely cause"
 else
   echo "FAIL: deny reason does not mention the per-user token"
   errors=$((errors + 1))
 fi
-if printf '%s' "$DECISION" | grep -qF "$TAMPERED"; then
+if printf '%s' "$DECISION" | grep -F "$TAMPERED" >/dev/null; then
   echo "FAIL: deny output leaked the token value"
   errors=$((errors + 1))
 else

@@ -193,7 +193,7 @@ if [ -n "$BLOCK_TAG" ]; then
   echo ""
   echo "--- 4. while the back-off holds ---"
   fire "$PRE_HOOK" pre-held "$CACHE1" "$(pre_json "echo free-tier-cap-deny held")"
-  if is_block pre-held && block_reason pre-held | grep -qF "$LIMIT_REASON"; then
+  if is_block pre-held && block_reason pre-held | grep -F "$LIMIT_REASON" >/dev/null; then
     pass "the pre hook blocks while the back-off holds"
   else
     fail "the pre hook did not block while the back-off holds (exit $(cat "$EVIDENCE/pre-held.rc"))"

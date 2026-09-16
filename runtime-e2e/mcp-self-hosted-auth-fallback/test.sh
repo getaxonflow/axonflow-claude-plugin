@@ -174,7 +174,7 @@ fi
 # Strong no-leak assertion when the agent log is reachable: the cs_ tenant must
 # NOT appear as an auth attempt during Part B.
 if [ -n "$LOG_SINCE" ]; then
-  if docker logs "$AXONFLOW_E2E_AGENT_CONTAINER" --since "$LOG_SINCE" 2>&1 | grep -q 'cs_e2e_stale_0000'; then
+  if docker logs "$AXONFLOW_E2E_AGENT_CONTAINER" --since "$LOG_SINCE" 2>&1 | grep 'cs_e2e_stale_0000' >/dev/null; then
     echo "FAIL: agent log shows the cs_ credential was sent to the Enterprise agent (leak)"; errors=$((errors+1))
   else
     echo "PASS: agent log shows NO cs_ credential reached the Enterprise agent during Part B"

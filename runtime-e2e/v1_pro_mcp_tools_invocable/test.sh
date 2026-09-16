@@ -242,7 +242,7 @@ record_tool_result() {
   # test.
   assert_success_true() {
     local _tool="$1" _body="$2"
-    if ! echo "$_body" | grep -qE '"success"[[:space:]]*:[[:space:]]*true'; then
+    if ! echo "$_body" | grep -E '"success"[[:space:]]*:[[:space:]]*true' >/dev/null; then
       fail "$_tool: result missing 'success: true' (axonflow-enterprise#1989 contract)"
     fi
   }
@@ -250,29 +250,29 @@ record_tool_result() {
   case "$expectation" in
     list_pro_features_ok)
       assert_success_true "$tool" "$body"
-      echo "$body" | grep -qF 'differentiators' || fail "$tool: result missing 'differentiators' field"
-      echo "$body" | grep -qF '9.99' || fail "$tool: result missing '9.99' price"
+      echo "$body" | grep -F 'differentiators' >/dev/null || fail "$tool: result missing 'differentiators' field"
+      echo "$body" | grep -F '9.99' >/dev/null || fail "$tool: result missing '9.99' price"
       ;;
     get_cost_estimate_envelope)
-      echo "$body" | grep -qF 'feature_pro_only' || fail "$tool: result missing 'feature_pro_only' limit_type"
-      echo "$body" | grep -qF 'buy.stripe.com/bJe28qbztcdVchjdkw8k800' || fail "$tool: result missing locked V1 buy URL"
+      echo "$body" | grep -F 'feature_pro_only' >/dev/null || fail "$tool: result missing 'feature_pro_only' limit_type"
+      echo "$body" | grep -F 'buy.stripe.com/bJe28qbztcdVchjdkw8k800' >/dev/null || fail "$tool: result missing locked V1 buy URL"
       ;;
     request_approval_ok)
       assert_success_true "$tool" "$body"
-      echo "$body" | grep -qE '"submitted"[[:space:]]*:[[:space:]]*true' || \
+      echo "$body" | grep -E '"submitted"[[:space:]]*:[[:space:]]*true' >/dev/null || \
         fail "$tool: result missing 'submitted: true' (axonflow-enterprise#1989 contract)"
-      echo "$body" | grep -qE 'approval_id|"id":' || fail "$tool: result missing approval_id"
+      echo "$body" | grep -E 'approval_id|"id":' >/dev/null || fail "$tool: result missing approval_id"
       ;;
     create_tenant_policy_ok)
       assert_success_true "$tool" "$body"
-      echo "$body" | grep -qE '"created"[[:space:]]*:[[:space:]]*true' || \
+      echo "$body" | grep -E '"created"[[:space:]]*:[[:space:]]*true' >/dev/null || \
         fail "$tool: result missing 'created: true' (axonflow-enterprise#1989 contract)"
-      echo "$body" | grep -qE 'policy_id' || fail "$tool: result missing policy_id"
+      echo "$body" | grep -E 'policy_id' >/dev/null || fail "$tool: result missing policy_id"
       ;;
     get_tenant_id_ok)
       assert_success_true "$tool" "$body"
-      echo "$body" | grep -qF "$TENANT" || fail "$tool: result missing tenant_id ($TENANT)"
-      echo "$body" | grep -qF 'getaxonflow.com/pricing' || fail "$tool: result missing upgrade_url"
+      echo "$body" | grep -F "$TENANT" >/dev/null || fail "$tool: result missing tenant_id ($TENANT)"
+      echo "$body" | grep -F 'getaxonflow.com/pricing' >/dev/null || fail "$tool: result missing upgrade_url"
       ;;
     *)
       fail "$tool: unknown expectation '$expectation'"

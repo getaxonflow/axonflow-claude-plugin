@@ -61,11 +61,11 @@ fi
 REASON=$(echo "$OUTPUT" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null || true)
 echo "permission decision reason: $REASON"
 
-if ! echo "$REASON" | grep -qE "decision:"; then
+if ! echo "$REASON" | grep -E "decision:" >/dev/null; then
   echo "FAIL: reason missing 'decision:' marker (Plugin Batch 1 richer context)"
   errors=$((errors + 1))
 fi
-if ! echo "$REASON" | grep -qE "risk:"; then
+if ! echo "$REASON" | grep -E "risk:" >/dev/null; then
   echo "FAIL: reason missing 'risk:' marker (Plugin Batch 1 richer context)"
   errors=$((errors + 1))
 fi

@@ -42,7 +42,7 @@ fi
 
 FIRST_STEP=$(echo "$WHATTODO" | awk '/^1\./ {capture=1; print; next} /^2\./ {exit} capture {print}')
 
-if echo "$FIRST_STEP" | grep -qF "scripts/status.sh"; then
+if echo "$FIRST_STEP" | grep -F "scripts/status.sh" >/dev/null; then
   echo "  PASS: step 1 references the local scripts/status.sh path"
   PASS=$((PASS+1))
 else
@@ -53,7 +53,7 @@ else
   FAIL=$((FAIL+1))
 fi
 
-if echo "$FIRST_STEP" | grep -qiE 'axonflow_get_tenant_id|MCP tool'; then
+if echo "$FIRST_STEP" | grep -iE 'axonflow_get_tenant_id|MCP tool' >/dev/null; then
   echo "  FAIL: step 1 mentions the MCP tool — must defer that to a fallback step"
   FAIL=$((FAIL+1))
 else
@@ -64,7 +64,7 @@ fi
 # Assertion 2: the rationale text must call out "no agent round-trip" or
 # equivalent — locks in the WHY so a future editor can't drop the local
 # preference without explicitly thinking about the round-trip cost.
-if echo "$FIRST_STEP" | grep -qiE 'no agent round-trip|without an agent round-trip|no HTTP call'; then
+if echo "$FIRST_STEP" | grep -iE 'no agent round-trip|without an agent round-trip|no HTTP call' >/dev/null; then
   echo "  PASS: step 1 calls out the no-round-trip benefit"
   PASS=$((PASS+1))
 else
@@ -76,7 +76,7 @@ fi
 # in the skill — we're flipping the preference, not deleting the
 # fallback. (Without this, a future editor might drop the MCP reference
 # entirely and lose the server-truth escape hatch.)
-if echo "$WHATTODO" | grep -qF "axonflow_get_tenant_id"; then
+if echo "$WHATTODO" | grep -F "axonflow_get_tenant_id" >/dev/null; then
   echo "  PASS: MCP tool axonflow_get_tenant_id still documented as fallback"
   PASS=$((PASS+1))
 else

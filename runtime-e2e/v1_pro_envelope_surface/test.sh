@@ -230,7 +230,7 @@ fail() { echo "FAIL: $1"; PASS=false; }
 [ "$(jq -r '.limit_type // empty' "$ENVELOPE_BODY")" = "daily_quota" ] || fail "envelope.limit_type not 'daily_quota'"
 [ "$(jq -r '.tier // empty' "$ENVELOPE_BODY")" = "Free" ] || fail "envelope.tier not 'Free'"
 WORD=$(jq -r '.upgrade.wording // empty' "$ENVELOPE_BODY")
-echo "$WORD" | grep -qF "$EXPECTED_WORDING" || fail "envelope.upgrade.wording missing locked phrase '$EXPECTED_WORDING'"
+echo "$WORD" | grep -F "$EXPECTED_WORDING" >/dev/null || fail "envelope.upgrade.wording missing locked phrase '$EXPECTED_WORDING'"
 [ "$(jq -r '.upgrade.buy_url // empty' "$ENVELOPE_BODY")" = "$EXPECTED_BUY_URL" ] || fail "envelope.upgrade.buy_url unexpected"
 
 H_TIER=$(grep -i '^x-axonflow-tier-limit:' "$ENVELOPE_HEADERS" | tr -d '\r' | awk '{print $2}')

@@ -168,7 +168,7 @@ if [ "$RECOVER_CODE" -ne 0 ]; then
   echo "  FAIL: recover.sh exited $RECOVER_CODE"
   echo "        output: $RECOVER_OUT"
   errors=$((errors + 1))
-elif ! echo "$RECOVER_OUT" | grep -q '^OK   202'; then
+elif ! echo "$RECOVER_OUT" | grep '^OK   202' >/dev/null; then
   echo "  FAIL: recover.sh did not emit OK 202 line"
   echo "        output: $RECOVER_OUT"
   errors=$((errors + 1))
@@ -219,7 +219,7 @@ if [ -n "$TOKEN" ]; then
     echo "  FAIL: recover-verify.sh exited $VERIFY_CODE"
     echo "        output: $VERIFY_OUT"
     errors=$((errors + 1))
-  elif ! echo "$VERIFY_OUT" | grep -q '^OK   tenant_id='; then
+  elif ! echo "$VERIFY_OUT" | grep '^OK   tenant_id=' >/dev/null; then
     echo "  FAIL: recover-verify.sh did not emit OK tenant_id= line"
     echo "        output: $VERIFY_OUT"
     errors=$((errors + 1))
@@ -276,7 +276,7 @@ if [ -n "$TOKEN" ]; then
     if [ "$REPLAY_CODE" -eq 0 ]; then
       echo "  FAIL: replay should have failed but exit code was 0"
       errors=$((errors + 1))
-    elif ! echo "$REPLAY_OUT" | grep -q "ERR  401"; then
+    elif ! echo "$REPLAY_OUT" | grep "ERR  401" >/dev/null; then
       echo "  FAIL: replay should surface ERR 401 from the platform"
       echo "        output: $REPLAY_OUT"
       errors=$((errors + 1))

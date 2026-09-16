@@ -63,7 +63,7 @@ errors=0
 echo "--- 1/7 tools/list ---"
 LIST_RESP=$(call_mcp 2 '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}')
 for tool in search_audit_events explain_decision list_recent_decisions create_override delete_override list_overrides; do
-  if echo "$LIST_RESP" | grep -q "\"name\":\"$tool\""; then
+  if echo "$LIST_RESP" | grep "\"name\":\"$tool\"" >/dev/null; then
     echo "PASS: tools/list advertises $tool"
   else
     echo "FAIL: tools/list missing $tool"
@@ -74,7 +74,7 @@ done
 # 2) search_audit_events — empty audit log path
 echo "--- 2/6 tools/call search_audit_events ---"
 RESP=$(call_mcp 3 '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_audit_events","arguments":{"limit":5}}}')
-if echo "$RESP" | grep -q '"error"'; then
+if echo "$RESP" | grep '"error"' >/dev/null; then
   echo "FAIL: search_audit_events returned error: $RESP"
   errors=$((errors + 1))
 else
@@ -84,7 +84,7 @@ fi
 # 3) list_overrides — empty list expected on fresh stack
 echo "--- 3/6 tools/call list_overrides ---"
 RESP=$(call_mcp 4 '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"list_overrides","arguments":{}}}')
-if echo "$RESP" | grep -q '"error"'; then
+if echo "$RESP" | grep '"error"' >/dev/null; then
   echo "FAIL: list_overrides returned error: $RESP"
   errors=$((errors + 1))
 else
@@ -95,7 +95,7 @@ fi
 #    structured "no data" rather than RPC error)
 echo "--- 4/6 tools/call explain_decision (unknown id) ---"
 RESP=$(call_mcp 5 '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"explain_decision","arguments":{"decision_id":"runtime-e2e-no-such-decision"}}}')
-if echo "$RESP" | grep -q '"jsonrpc"'; then
+if echo "$RESP" | grep '"jsonrpc"' >/dev/null; then
   echo "PASS: explain_decision dispatched (response shape valid)"
 else
   echo "FAIL: explain_decision response malformed: $RESP"
@@ -106,7 +106,7 @@ fi
 #    not a transport error. The MCP layer wraps it as a tool result with isError.
 echo "--- 5/6 tools/call create_override (missing reason → server validation) ---"
 RESP=$(call_mcp 6 '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"create_override","arguments":{"policy_id":"sys_test_v1","policy_type":"static"}}}')
-if echo "$RESP" | grep -q '"jsonrpc"'; then
+if echo "$RESP" | grep '"jsonrpc"' >/dev/null; then
   echo "PASS: create_override dispatched (server validation result returned)"
 else
   echo "FAIL: create_override response malformed: $RESP"
@@ -116,7 +116,7 @@ fi
 # 6) delete_override — non-existent id
 echo "--- 6/7 tools/call delete_override (nonexistent id) ---"
 RESP=$(call_mcp 7 '{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"delete_override","arguments":{"override_id":"runtime-e2e-no-such-override"}}}')
-if echo "$RESP" | grep -q '"jsonrpc"'; then
+if echo "$RESP" | grep '"jsonrpc"' >/dev/null; then
   echo "PASS: delete_override dispatched"
 else
   echo "FAIL: delete_override response malformed: $RESP"

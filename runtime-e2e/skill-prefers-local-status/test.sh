@@ -100,7 +100,7 @@ FIRST_CMD=$(echo "$FIRST_GOVERNED" | jq -r '.input.command // empty')
 if [ "$FIRST_NAME" != "Bash" ]; then
   fail "first non-Skill tool name='$FIRST_NAME', want 'Bash' (skill should prefer the local script)"
 fi
-if ! echo "$FIRST_CMD" | grep -qF "scripts/status.sh"; then
+if ! echo "$FIRST_CMD" | grep -F "scripts/status.sh" >/dev/null; then
   fail "first Bash command does not reference scripts/status.sh: '$FIRST_CMD'"
 fi
 
@@ -123,7 +123,7 @@ fi
 # script's stdout), or the assistant's answer text.
 RESULT_FULL=$(cat "$OUTPUT_FILE")
 echo "$RESULT_FULL" > "$EVIDENCE/result_full.jsonl"
-if ! echo "$RESULT_FULL" | grep -qiE 'tenant[_ ]id|cs_'; then
+if ! echo "$RESULT_FULL" | grep -iE 'tenant[_ ]id|cs_' >/dev/null; then
   fail "no tenant_id-shaped content anywhere in the captured stream"
 fi
 

@@ -49,7 +49,7 @@ if [ -z "${AXONFLOW_PEP_HANDSHAKE:-}" ] && [ -n "${AXONFLOW_PEP_AUDIENCE:-}" ]; 
   # the grammar check ever runs.
   _pep_flat=$(printf '%s' "$AXONFLOW_PEP_AUDIENCE" | tr -d '\n\r')
   if [ "$_pep_flat" = "$AXONFLOW_PEP_AUDIENCE" ] \
-     && printf '%s' "$AXONFLOW_PEP_AUDIENCE" | LC_ALL=C grep -qE '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'; then
+     && printf '%s' "$AXONFLOW_PEP_AUDIENCE" | LC_ALL=C grep -E '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' >/dev/null; then
     # profile_version, pep_id, audience, capabilities - every member required,
     # in the platform encoder's member order. `capabilities` is ALWAYS present:
     # an omitted member is MALFORMED, while [] is the declaration "I discharge
