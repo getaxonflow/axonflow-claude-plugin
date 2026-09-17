@@ -76,7 +76,7 @@ trap cleanup EXIT
 echo "stage plugin to $STAGE_DIR/plugin"
 PLUGIN_STAGE="$STAGE_DIR/plugin"
 mkdir -p "$PLUGIN_STAGE/.claude-plugin" "$PLUGIN_STAGE/hooks" \
-         "$PLUGIN_STAGE/scripts" "$PLUGIN_STAGE/commands" \
+         "$PLUGIN_STAGE/scripts/lib" "$PLUGIN_STAGE/commands" \
          "$PLUGIN_STAGE/skills"
 
 cp -p "$PLUGIN_DIR/.claude-plugin/plugin.json" "$PLUGIN_STAGE/.claude-plugin/" \
@@ -89,6 +89,9 @@ cp -p "$PLUGIN_DIR/hooks/hooks.json" "$PLUGIN_STAGE/hooks/" \
 # Stage every script (the manifest references them by name).
 cp -p "$PLUGIN_DIR/scripts"/*.sh "$PLUGIN_STAGE/scripts/"
 chmod +x "$PLUGIN_STAGE/scripts/"*.sh
+# The failure-posture table both hooks source (without it they block, naming it).
+cp -p "$PLUGIN_DIR/scripts/lib"/*.sh "$PLUGIN_STAGE/scripts/lib/" \
+  || { fail "missing scripts/lib/*.sh"; exit 1; }
 
 pass "plugin payload staged"
 
@@ -176,7 +179,7 @@ fire_posttooluse() {
   local statement="${1:-echo benign}"
   local stdout="${2:-ok}"
   local out
-  out=$(echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$statement\"},\"tool_response\":{\"stdout\":\"$stdout\",\"exitCode\":0}}" | \
+  out=$(echo "{\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$statement\"},\"tool_response\":{\"stdout\":\"$stdout\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}}" | \
     HOME="$HOME_DIR" \
     AXONFLOW_ENDPOINT="$ENDPOINT" \
     AXONFLOW_TELEMETRY=off \

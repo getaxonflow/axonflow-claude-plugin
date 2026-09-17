@@ -1,15 +1,17 @@
 ---
 name: list-overrides
-description: List active session overrides scoped to the caller's tenant — useful for auditing dangling overrides or confirming an override is in effect before retrying
+description: List the session overrides recorded for the caller's tenant - a read, unchanged on AxonFlow v11.0.0, where an override no longer changes a verdict
 ---
 
-Use this skill to inventory active session overrides — for example, before asking the user "should we keep that override active?", or to confirm an override is still in effect before retrying a previously-blocked tool call.
+Use this skill to inventory the session overrides recorded for the caller's tenant, for example to audit what was created before an upgrade to AxonFlow v11.0.0.
 
 Call the `list_overrides` MCP tool. Optional filters:
 
-- `policy_id` — restrict to overrides for a specific policy
-- `include_revoked` — include already-revoked overrides (default: false)
+- `policy_id` - restrict to overrides for a specific policy
+- `include_revoked` - include already-revoked overrides (default: false)
 
 The response is `{ overrides: [...], count: <int> }` where each override carries `id`, `policy_id`, `expires_at`, `created_at`, and the original justification.
 
-Present results as a short table: ID, policy, expires-at, justification. Flag any override whose `expires_at` is more than 12 hours away as "long-lived — consider revoking when the work that needed it is done".
+Present results as a short table: ID, policy, expires-at, justification.
+
+**From AxonFlow v11.0.0 an override changes no verdict.** A listed override does not mean a blocked tool call will now be allowed, so never suggest retrying a blocked call because an override is listed. New overrides cannot be created; `create-override` explains why and what changes a verdict instead.

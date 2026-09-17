@@ -1,0 +1,32 @@
+{
+  "session_id": "7e2ac26d-7ef3-4da6-8d17-2f3258a00d30",
+  "transcript_path": "/home/user/.claude/projects/-home-user-project/7e2ac26d-7ef3-4da6-8d17-2f3258a00d30.jsonl",
+  "cwd": "/home/user/project",
+  "scratchpad_dir": "/tmp/claude-1000/-home-user-project/SESSION/scratchpad",
+  "prompt_id": "438bf0ee-3d0a-438d-8f3d-543f7d17ce72",
+  "permission_mode": "dontAsk",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "NotebookEdit",
+  "tool_input": {
+    "notebook_path": "/home/user/project/p1-nb.ipynb",
+    "cell_id": "c1",
+    "new_source": "print('p1-notebook-capture')"
+  },
+  "tool_response": {
+    "new_source": "print('p1-notebook-capture')",
+    "old_source": "print('p1-before')",
+    "cell_type": "code",
+    "language": "python",
+    "edit_mode": "replace",
+    "cell_id": "c1",
+    "error": "",
+    "notebook_path": "/home/user/project/p1-nb.ipynb",
+    "original_file": "{\"cells\":[{\"cell_type\":\"code\",\"execution_count\":null,\"id\":\"c1\",\"metadata\":{},\"outputs\":[],\"source\":[\"print('p1-before')\"]}],\"metadata\":{\"kernelspec\":{\"display_name\":\"Python 3\",\"language\":\"python\",\"name\":\"python3\"},\"language_info\":{\"name\":\"python\"}},\"nbformat\":4,\"nbformat_minor\":5}\n",
+    "updated_file": "{\n \"cells\": [\n  {\n   \"cell_type\": \"code\",\n   \"execution_count\": null,\n   \"id\": \"c1\",\n   \"metadata\": {},\n   \"outputs\": [],\n   \"source\": \"print('p1-notebook-capture')\"\n  }\n ],\n \"metadata\": {\n  \"kernelspec\": {\n   \"display_name\": \"Python 3\",\n   \"language\": \"python\",\n   \"name\": \"python3\"\n  },\n  \"language_info\": {\n   \"name\": \"python\"\n  }\n },\n \"nbformat\": 4,\n \"nbformat_minor\": 5\n}"
+  },
+  "tool_use_id": "toolu_01HoBKd8ZE1yazA94ZLwivp1",
+  "duration_ms": 5
+}

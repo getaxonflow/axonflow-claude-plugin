@@ -11,6 +11,47 @@ set -uo pipefail
 : "${AXONFLOW_ENDPOINT:=http://localhost:8080}"
 : "${AXONFLOW_CLIENT_ID:=demo-client}"
 : "${AXONFLOW_CLIENT_SECRET:=demo-secret}"
+# The per-user identity the override suites present (X-User-Email, through the
+# plugin's MCP headersHelper from AXONFLOW_USER_EMAIL). An override write is
+# scoped to an individual user, and the platform refuses a session with no
+# per-user identity for that reason before it answers anything else.
+: "${AXONFLOW_E2E_USER_EMAIL:=claude-runtime-e2e@axonflow-test.invalid}"
+
+# The session-override writes are retired from AxonFlow v11.0.0. Measured on a
+# v11.0.0 community stack with AXONFLOW_TRUST_IDENTITY_HEADERS=true:
+#   - MCP create_override / delete_override answer a tool error (isError: true)
+#     whose text begins with OVERRIDE_FROZEN_PREFIX. create_override on a
+#     session with no per-user identity is refused for its identity first.
+#   - REST POST / DELETE /api/v1/overrides with a per-user identity answer
+#     HTTP 409 {"error":{"code":"LEGACY_POLICY_WRITE_FROZEN","message":...}}.
+#   - list_overrides and GET /api/v1/overrides are unchanged reads
+#     ({"count":0,"overrides":[]} on a stack where none were ever created).
+OVERRIDE_FROZEN_PREFIX="LEGACY_POLICY_WRITE_FROZEN: "
+OVERRIDE_FROZEN_CODE="LEGACY_POLICY_WRITE_FROZEN"
+
+# runtime_e2e_refuse_production <url> <what this suite writes there>
+#
+# Production Community SaaS (https://try.getaxonflow.com) is never a default
+# target: a suite that registers a tenant, writes a policy or edits the
+# database there changes live state (axonflow-enterprise#4249, comments
+# 5684192928 and 5694502320). When <url>'s host is try.getaxonflow.com the
+# suite SKIPs, naming what it would write, unless the operator set
+# AXONFLOW_E2E_ALLOW_PRODUCTION=1 for this run. Any other host returns.
+runtime_e2e_refuse_production() {
+  local url="$1" writes="$2" host
+  host=$(printf '%s' "$url" | sed -E 's#^[A-Za-z][A-Za-z0-9+.-]*://##; s#^[^@/]*@##; s#[:/?#].*$##' | tr '[:upper:]' '[:lower:]')
+  case "$host" in
+    try.getaxonflow.com|try.getaxonflow.com.) ;;
+    *) return 0 ;;
+  esac
+  if [ "${AXONFLOW_E2E_ALLOW_PRODUCTION:-}" = "1" ]; then
+    echo "WARNING: running against PRODUCTION Community SaaS at $url (AXONFLOW_E2E_ALLOW_PRODUCTION=1); this suite $writes"
+    return 0
+  fi
+  echo "SKIP: $url is PRODUCTION Community SaaS, and this suite $writes."
+  echo "      Point it at a stack you own, or set AXONFLOW_E2E_ALLOW_PRODUCTION=1 to run it there deliberately."
+  exit 0
+}
 
 # Skip path is the same for every test — extract for clarity.
 runtime_e2e_skip_if_unavailable() {
@@ -43,6 +84,8 @@ run_claude_with_tool() {
   export AXONFLOW_ENDPOINT
   export AXONFLOW_AUTH
   AXONFLOW_AUTH="$(printf '%s:%s' "$AXONFLOW_CLIENT_ID" "$AXONFLOW_CLIENT_SECRET" | base64)"
+  # The plugin's MCP headersHelper sends AXONFLOW_USER_EMAIL as X-User-Email.
+  export AXONFLOW_USER_EMAIL="${AXONFLOW_USER_EMAIL:-$AXONFLOW_E2E_USER_EMAIL}"
 
   local plugin_dir
   plugin_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -50,8 +93,12 @@ run_claude_with_tool() {
   local tmpdir
   tmpdir="$(mktemp -d -t axonflow-claude-e2e.XXXXXX)"
 
+  # --setting-sources project, from an empty directory: the operator's own
+  # user-level settings (their hooks, their other plugins) never run inside a
+  # runtime proof of this plugin.
   ( cd "$tmpdir" && claude \
     --plugin-dir "$plugin_dir" \
+    --setting-sources project \
     --print \
     --output-format stream-json \
     --include-partial-messages \
@@ -96,7 +143,7 @@ assert_tool_result_succeeded() {
 assert_result_contains() {
   local output_file="$1"
   local needle="$2"
-  jq -r 'select(.type=="result") | .result' "$output_file" 2>/dev/null | grep -q "$needle"
+  jq -r 'select(.type=="result") | .result' "$output_file" 2>/dev/null | grep "$needle" >/dev/null
 }
 
 # ---------------------------------------------------------------------------
@@ -138,6 +185,7 @@ run_claude_plugin() {
     fi
     claude \
       --plugin-dir "$plugin_dir" \
+      --setting-sources project \
       --print \
       --output-format stream-json \
       --verbose \
@@ -168,57 +216,96 @@ assert_no_raw_oauth_404() {
   ! grep -qiE 'Invalid OAuth error response|Raw body: 404 page not found' "$f"
 }
 
-# require_override_preflight <http_status> <body> [extra_hint]
-#
-# Classifies the result of the override-create pre-flight the override
-# lifecycle tests use to seed state. Every one of them previously printed
-# `SKIP: pre-flight create_override returned HTTP $STATUS` and exited 0 on ANY
-# non-201 — so they passed-by-skipping in exactly the default configuration
-# every user runs (#3062): the agent strips X-User-Email unless
-# AXONFLOW_TRUST_IDENTITY_HEADERS=true, so create_override 401s and the suite
-# reported green while two of the eleven advertised tools were dead.
-#
-# A test that skips is not a test. The ONLY legitimate exit-0 here is
-# environment unavailability, which the harness checks before this point. A
-# reachable stack that refuses to create an override is a FAILURE, and this
-# prints the remediation instead of swallowing it.
-require_override_preflight() {
-  local status="$1"
-  local body="$2"
-  local extra_hint="${3:-}"
+# tool_result_text <output-file> <tool-suffix>
+#   The text of the tool_result Claude Code captured for the FIRST call to the
+#   MCP tool ending in <tool-suffix> (matched by tool_use_id), or empty.
+tool_result_text() {
+  local f="$1" suffix="$2" id
+  id=$(jq -r --arg s "$suffix" 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and (.name | endswith($s))) | .id' "$f" 2>/dev/null | head -1)
+  [ -n "$id" ] || return 0
+  jq -r --arg id "$id" 'select(.type=="user") | .message.content[]? | select(.type=="tool_result" and .tool_use_id == $id) | .content | if type == "string" then . else (map(.text? // empty) | join("")) end' "$f" 2>/dev/null | head -c 4000
+}
 
-  if [ "$status" = "201" ]; then
+# tool_result_is_error <output-file> <tool-suffix>: "true" or "false".
+tool_result_is_error() {
+  local f="$1" suffix="$2" id
+  id=$(jq -r --arg s "$suffix" 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use" and (.name | endswith($s))) | .id' "$f" 2>/dev/null | head -1)
+  [ -n "$id" ] || { echo false; return 0; }
+  jq -r --arg id "$id" 'select(.type=="user") | .message.content[]? | select(.type=="tool_result" and .tool_use_id == $id) | (.is_error // false)' "$f" 2>/dev/null | head -1
+}
+
+# smoke_line <output-file>: the JSON after SMOKE_RESULT: in the agent's own
+# final message (the stream's result event), or empty. The prompt is not in
+# that event, so an agent that answered nothing yields nothing.
+smoke_line() {
+  jq -r 'select(.type=="result") | .result' "$1" 2>/dev/null | grep "SMOKE_RESULT:" | tail -1 | sed 's/.*SMOKE_RESULT: *//'
+}
+
+# mcp_tool_call <tool> <arguments JSON> [extra curl arguments ...]
+#   Calls one MCP tool directly (not through Claude Code) with the suite's
+#   credential and prints the raw JSON-RPC response: the channel-independent
+#   check of what the platform answers.
+mcp_tool_call() {
+  local tool="$1" args="$2"
+  shift 2
+  jq -nc --arg t "$tool" --argjson a "$args" '{jsonrpc:"2.0",id:"1",method:"tools/call",params:{name:$t,arguments:$a}}' | \
+    curl -s -X POST -H "Content-Type: application/json" -H "Accept: application/json" \
+      -H "Authorization: Basic $(printf '%s:%s' "$AXONFLOW_CLIENT_ID" "$AXONFLOW_CLIENT_SECRET" | base64)" \
+      "$@" --data-binary @- "$AXONFLOW_ENDPOINT/api/v1/mcp-server"
+}
+
+# mcp_override_count: the count list_overrides reports, or empty.
+mcp_override_count() {
+  mcp_tool_call list_overrides '{"include_revoked":true}' -H "X-User-Email: $AXONFLOW_E2E_USER_EMAIL" \
+    | jq -r '.result.content[0].text // empty' 2>/dev/null | jq -r '.count // empty' 2>/dev/null
+}
+
+# assert_override_frozen_text <label> <is_error> <text>
+#   0 when the answer is the retired-write tool error. A test that skips is not
+#   a test (#3062): any other answer FAILS, with the text and the likely cause.
+assert_override_frozen_text() {
+  local label="$1" is_error="$2" text="$3"
+  if [ "$is_error" = "true" ] && [ "${text#"$OVERRIDE_FROZEN_PREFIX"}" != "$text" ]; then
+    echo "PASS: $label answered the retired write: $(printf '%s' "$text" | cut -c1-100)..."
     return 0
   fi
-
-  echo "FAIL: pre-flight create_override returned HTTP $status (expected 201)"
-  echo "      Body: $body"
-  [ -n "$extra_hint" ] && echo "      $extra_hint"
-  echo ""
-
-  case "$status" in
-    401)
-      echo "      The override endpoints require a per-user identity. This deployment"
-      echo "      is not configured to trust client-asserted identity headers, so the"
-      echo "      AxonFlow Agent removed the X-User-Email this test sent."
-      echo ""
-      echo "      Set the posture this test requires, then re-run:"
-      echo "        AXONFLOW_TRUST_IDENTITY_HEADERS=true   # on the AGENT, then restart it"
-      echo ""
-      echo "      Only enable it when every hop that can reach the agent asserts"
-      echo "      end-user identity from a validated source — see"
-      echo "      docs/security/identity-header-trust.md in axonflow-enterprise."
-      ;;
-    403)
-      echo "      The stack rejected the override on policy grounds. Check the seed"
-      echo "      policy is overridable (not critical-risk, allow_override=true) —"
-      echo "      migration 076 sets severity=critical => allow_override=FALSE."
-      ;;
-    404)
-      echo "      The seed policy was not found for this tenant. Confirm the stack's"
-      echo "      migrations ran and that X-Tenant-ID matches the seeded tenant."
+  echo "FAIL: $label did not answer a tool error beginning \"$OVERRIDE_FROZEN_PREFIX\" (is_error=$is_error)"
+  echo "      Text: $(printf '%s' "$text" | cut -c1-600)"
+  case "$text" in
+    *"scoped to an individual user"*)
+      echo "      The session carried no per-user identity, so the platform refused it for"
+      echo "      identity first. The suite sends X-User-Email; the agent drops it unless"
+      echo "      AXONFLOW_TRUST_IDENTITY_HEADERS=true is set on it. Only enable that when"
+      echo "      every hop that can reach the agent asserts end-user identity from a"
+      echo "      validated source."
       ;;
   esac
+  return 1
+}
 
+# assert_mcp_override_frozen <label> <raw MCP response>
+assert_mcp_override_frozen() {
+  local is_error text
+  is_error=$(printf '%s' "$2" | jq -r '.result.isError // false' 2>/dev/null)
+  text=$(printf '%s' "$2" | jq -r '.result.content[0].text // ""' 2>/dev/null)
+  assert_override_frozen_text "$1" "$is_error" "$text"
+}
+
+# assert_rest_override_frozen <label> <http status> <body>
+assert_rest_override_frozen() {
+  local label="$1" status="$2" body="${3:-}" code
+  code=$(printf '%s' "$body" | jq -r '.error.code? // empty' 2>/dev/null)
+  if [ "$status" = "409" ] && [ "$code" = "$OVERRIDE_FROZEN_CODE" ]; then
+    echo "PASS: $label answered HTTP 409 $OVERRIDE_FROZEN_CODE"
+    return 0
+  fi
+  echo "FAIL: $label answered HTTP $status (expected 409 $OVERRIDE_FROZEN_CODE)"
+  [ -n "$body" ] && echo "      Body: $(printf '%s' "$body" | cut -c1-600)"
+  if [ "$status" = "401" ]; then
+    echo "      The override endpoints check a per-user identity before they answer the"
+    echo "      retirement. The agent removed the X-User-Email this suite sent: set"
+    echo "      AXONFLOW_TRUST_IDENTITY_HEADERS=true on the AGENT and restart it (only when"
+    echo "      every hop that can reach it asserts end-user identity from a validated source)."
+  fi
   return 1
 }

@@ -79,6 +79,11 @@ plant() {
   local label="$1" prog="$2" copy="${MUT_DIR}/mutant.sh"
   cp "$SCRIPT_PATH" "$copy"
   sed -i.bak "$prog" "$copy" 2>/dev/null || sed -i '' "$prog" "$copy"
+  # A plant whose pattern no longer matches the script is no mutant at all.
+  if cmp -s "$SCRIPT_PATH" "$copy"; then
+    fail "PLANT DID NOT APPLY (${label}) - its sed program matches nothing in $(basename "$SCRIPT_PATH"); re-anchor it"
+    return
+  fi
   if matrix "$copy"; then
     fail "MUTANT SURVIVED (${label}) - the matrix cannot detect this defect, so a green run proves nothing about it"
   else
@@ -87,7 +92,8 @@ plant() {
 }
 
 # The grammar check deleted entirely: every malformed audience would be built.
-plant "the audience grammar check removed" 's/grep -qE/grep -qE --invert-match-DISABLED/'
+# (`-e . -e <grammar>` matches any line, so the check passes every audience.)
+plant "the audience grammar check removed" 's/LC_ALL=C grep -E /LC_ALL=C grep -E -e . -e /'
 # The newline guard removed: grep is line-based, so a multi-line audience would
 # pass on its first line and put a raw newline inside a JSON string.
 plant "the multi-line guard removed" 's/\[ "\$_pep_flat" = "\$AXONFLOW_PEP_AUDIENCE" \]/[ 1 = 1 ]/'
@@ -110,7 +116,7 @@ else
 
   CODE=$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 -X POST \
     "${ENDPOINT}/api/v1/mcp/check-input" -H 'Content-Type: application/json' \
-    "${AUTH[@]}" -H "X-Axonflow-PEP-Handshake: ${HS}" -d "$BODY")
+    ${AUTH[@]+"${AUTH[@]}"} -H "X-Axonflow-PEP-Handshake: ${HS}" -d "$BODY")
   if [ "$CODE" != "400" ]; then
     pass "a real agent ACCEPTED the declaration this plugin builds (HTTP ${CODE})"
   else
@@ -121,7 +127,7 @@ else
   # explained by an agent that ignores the header.
   BAD=$(curl -s --max-time 20 -X POST \
     "${ENDPOINT}/api/v1/mcp/check-input" -H 'Content-Type: application/json' \
-    "${AUTH[@]}" -H "X-Axonflow-PEP-Handshake: !!!not-base64!!!" -d "$BODY")
+    ${AUTH[@]+"${AUTH[@]}"} -H "X-Axonflow-PEP-Handshake: !!!not-base64!!!" -d "$BODY")
   if grep -q "X-Axonflow-PEP-Handshake" <<<"$BAD"; then
     pass "the same agent REFUSES a malformed declaration and names the header"
   else

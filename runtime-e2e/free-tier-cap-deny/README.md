@@ -25,6 +25,8 @@ Claude Code runs each hook as a subprocess, passes the hook JSON on stdin (`{"to
 
 The leg skips cleanly when the endpoint is unreachable, or when `/api/v1/register` answers 404 (a stack that is not in Community SaaS mode). Each run registers one tenant, and the registration route is rate limited per IP.
 
+> **Never a default target: production.** Against `https://try.getaxonflow.com` the leg would register a tenant on production Community SaaS, so it SKIPs there unless `AXONFLOW_E2E_ALLOW_PRODUCTION=1` is set for the run (`runtime_e2e_refuse_production` in `runtime-e2e/_lib/claude-runtime.sh`).
+
 ## Run
 
     AXONFLOW_ENDPOINT=http://localhost:8080 bash runtime-e2e/free-tier-cap-deny/test.sh

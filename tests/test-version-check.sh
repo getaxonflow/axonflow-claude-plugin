@@ -81,7 +81,7 @@ ASSERT() {
   local label="$1"
   local expected_pattern="$2"
   local actual="$3"
-  if echo "$actual" | grep -qE "$expected_pattern"; then
+  if echo "$actual" | grep -E "$expected_pattern" >/dev/null; then
     echo "  pass: $label"
     PASS_COUNT=$((PASS_COUNT + 1))
   else

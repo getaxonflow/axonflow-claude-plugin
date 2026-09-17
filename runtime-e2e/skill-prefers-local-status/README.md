@@ -7,9 +7,8 @@ operator asks "what's my AxonFlow tenant ID?".
 ## What this test exercises
 
 End-to-end against the **real `claude` CLI** with the plugin loaded
-against a **real AxonFlow agent** (defaults to
-`https://try.getaxonflow.com` Community SaaS when nothing else is
-configured). Per HARD RULE #0
+against a **real AxonFlow agent**: the one `AXONFLOW_ENDPOINT` names
+(`http://localhost:8080` when unset). Per HARD RULE #0
 (`feedback_runtime_proof_is_definition_of_done.md`) — the bytes the
 agent reasons against, the bytes it answers from, and the bytes the
 host CLI captures in `--output-format stream-json` are all real.
@@ -38,16 +37,19 @@ behaviour change in.
 4. Assert the final result text mentions a `tenant_id` value (the
    skill's step 3 says to surface it to the user).
 
+> **Never a default target: production.** Against `https://try.getaxonflow.com` the plugin's hooks register a Community SaaS tenant on first use, so this suite SKIPs there unless `AXONFLOW_E2E_ALLOW_PRODUCTION=1` is set for the run (`runtime_e2e_refuse_production` in `runtime-e2e/_lib/claude-runtime.sh`). Its `test.sh` used to carry a production default for `AXONFLOW_ENDPOINT`, which never took effect: the runtime lib had already set the endpoint to `http://localhost:8080`. It is removed.
+
 ## Skip conditions
 
 - `claude` CLI not on PATH → SKIP.
 - `jq` not on PATH → SKIP.
+- `AXONFLOW_ENDPOINT` is production `https://try.getaxonflow.com` and `AXONFLOW_E2E_ALLOW_PRODUCTION` is not `1` → SKIP.
 - `${AXONFLOW_ENDPOINT}/health` not reachable → SKIP (offline / firewalled CI).
 
 ## Usage
 
 ```bash
-# Default (Community SaaS):
+# Default (a local stack at http://localhost:8080):
 bash runtime-e2e/skill-prefers-local-status/test.sh
 
 # Self-hosted:

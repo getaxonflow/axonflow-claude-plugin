@@ -159,7 +159,9 @@ fi
 # mkdir-based atomic lock (POSIX-portable: mkdir is atomic w.r.t. itself).
 LOCK_HELD=0
 if [ "$HAS_FLOCK" = "1" ]; then
-  exec 8>"$LOCK_FILE" 2>/dev/null || { return 0 2>/dev/null || exit 0; }
+  # The group scopes 2>/dev/null to this one line: `exec 8>file 2>/dev/null`
+  # would send the calling hook's stderr to /dev/null for the rest of its run.
+  { exec 8>"$LOCK_FILE"; } 2>/dev/null || { return 0 2>/dev/null || exit 0; }
   if ! flock -n 8 2>/dev/null; then
     return 0 2>/dev/null || exit 0
   fi
@@ -185,13 +187,17 @@ fi
 # Single EXIT trap covers BOTH the optional mkdir lockdir AND the
 # tempfiles below. Defining it once here avoids the second `trap` below
 # from clobbering the lockdir-cleanup we'd otherwise install separately.
-cleanup_on_exit() {
+_axonflow_bootstrap_cleanup_on_exit() {
   [ -n "${HTTP_CODE_FILE:-}" ] && rm -f "$HTTP_CODE_FILE" 2>/dev/null
   [ -n "${RESPONSE_BODY_FILE:-}" ] && rm -f "$RESPONSE_BODY_FILE" 2>/dev/null
   [ "$LOCK_HELD" = "2" ] && rm -rf "$LOCK_DIR" 2>/dev/null
   return 0
 }
-trap cleanup_on_exit EXIT
+trap _axonflow_bootstrap_cleanup_on_exit EXIT
+# A hook that replaces this trap with its own runs the cleanup through
+# axonflow_bootstrap_cleanup (scripts/lib/failure-posture.sh), which checks
+# this marker.
+_AXONFLOW_BOOTSTRAP_TRAP=1
 
 # Re-check freshness inside the lock — a peer process may have just registered.
 if registration_is_fresh "$REGISTRATION_FILE"; then
@@ -205,7 +211,7 @@ LABEL="claude-code-plugin@${PLUGIN_VERSION} / $(uname -s)-$(uname -m)"
 
 # Issue the registration. --fail returns non-zero on HTTP 4xx/5xx so we
 # can distinguish 201/200 from 429 and other failures via curl exit code.
-# Tempfile cleanup is handled by the cleanup_on_exit trap installed earlier.
+# Tempfile cleanup is handled by the _axonflow_bootstrap_cleanup_on_exit trap installed earlier.
 HTTP_CODE_FILE="$(mktemp 2>/dev/null)" || { return 0 2>/dev/null || exit 0; }
 RESPONSE_BODY_FILE="$(mktemp 2>/dev/null)" || { return 0 2>/dev/null || exit 0; }
 
@@ -213,7 +219,14 @@ RESPONSE_BODY_FILE="$(mktemp 2>/dev/null)" || { return 0 2>/dev/null || exit 0; 
 # shellcheck disable=SC1091
 . "$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/client-header.sh"
 
-curl -sS --max-time 10 -o "$RESPONSE_BODY_FILE" -w "%{http_code}" \
+# The hooks give the registration at most what their time budget allows
+# (_AXONFLOW_REGISTER_MAX_TIME, from scripts/lib/failure-posture.sh); 0 means
+# no time is left this call, so no registration is attempted. Other callers
+# keep the 10-second default.
+if [ "${_AXONFLOW_REGISTER_MAX_TIME:-10}" = "0" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+curl -sS --max-time "${_AXONFLOW_REGISTER_MAX_TIME:-10}" -o "$RESPONSE_BODY_FILE" -w "%{http_code}" \
   -X POST "$REGISTER_URL" \
   -H "Content-Type: application/json" \
   -H "X-Axonflow-Client: ${AXONFLOW_CLIENT_HEADER}" \
