@@ -8,7 +8,7 @@
 # the ONLY source for that credential was the AXONFLOW_AUTH env var — unlike
 # Community-SaaS (durably cached in ~/.config/axonflow/try-registration.json)
 # and Pro (~/.config/axonflow/license-token.json). That single-source design
-# had two failure modes a design partner hit on a real Enterprise install:
+# had two failure modes an evaluation tenant hit on a real Enterprise install:
 #
 #   1. When AXONFLOW_AUTH did not reach a subprocess (env divergence between
 #      the per-call hooks and the MCP `headersHelper`), there was no fallback,
