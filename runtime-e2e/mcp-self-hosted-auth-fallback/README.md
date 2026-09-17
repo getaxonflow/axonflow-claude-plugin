@@ -32,7 +32,7 @@ never touched. Unit-level coverage lives in `tests/test-mcp-headers.sh`.
 
 ```bash
 export AXONFLOW_ENDPOINT=http://localhost:8080
-export AXONFLOW_E2E_ORG_ID=<org>            # e.g. bukuwarung-eval
+export AXONFLOW_E2E_ORG_ID=<org>            # e.g. acme-eval
 export AXONFLOW_E2E_LICENSE_KEY=<AXON-...>   # real license key
 # optional, strengthens Part B:
 export AXONFLOW_E2E_AGENT_CONTAINER=axonflow-install-axonflow-agent-1

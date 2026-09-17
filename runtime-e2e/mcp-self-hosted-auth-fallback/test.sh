@@ -2,7 +2,7 @@
 # Claude Code runtime E2E — axonflow-claude-plugin#94.
 #
 # Reproduces, against the REAL claude binary + the REAL plugin + a REAL
-# self-hosted/Enterprise agent, the bug a design partner hit: MCP tools/call
+# self-hosted/Enterprise agent, the bug an evaluation tenant hit: MCP tools/call
 # 401'd on Enterprise while the per-call hooks governed fine.
 #
 # Root cause: with AXONFLOW_AUTH unset and a Community-SaaS try-registration.json
