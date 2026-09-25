@@ -1,5 +1,5 @@
 ---
-description: Fetch the full reasoning behind an AxonFlow policy decision (matched policies, risk level, override availability)
+description: Fetch the full reasoning behind an AxonFlow policy decision (matched policies and recent hit count)
 argument-hint: <decision-id>
 ---
 
@@ -11,7 +11,8 @@ If no decision ID was provided, ask the user for one (it's typically returned in
 
 Present the result clearly:
 
-- Which policy fired (name + risk level)
+- Which policy fired, and its risk level when the platform reports one (`risk_level` and `allow_override` are null from AxonFlow v11.0.0)
 - The decision reason
-- Whether an override is available; if yes, suggest the user invoke `/axonflow-create-override` with a justification
 - The rolling 24h hit count for context
+
+Do not suggest a session override: from AxonFlow v11.0.0 an override changes no verdict. If the user wants the verdict changed, explain that an administrator changes the policy in the organization's typed policy document (`/axonflow-create-override` has the details).

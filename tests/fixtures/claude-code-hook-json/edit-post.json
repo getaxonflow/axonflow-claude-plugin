@@ -1,0 +1,41 @@
+{
+  "session_id": "ff732378-445f-4eaf-9fd4-0c072476f406",
+  "transcript_path": "/home/user/.claude/projects/-home-user-project/ff732378-445f-4eaf-9fd4-0c072476f406.jsonl",
+  "cwd": "/home/user/project",
+  "scratchpad_dir": "/tmp/claude-1000/-home-user-project/SESSION/scratchpad",
+  "prompt_id": "dd1562b5-24e4-46c4-981e-f36e37793924",
+  "permission_mode": "dontAsk",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Edit",
+  "tool_input": {
+    "file_path": "/home/user/project/p1-note.txt",
+    "old_string": "p1-write-capture",
+    "new_string": "p1-edit-capture",
+    "replace_all": false
+  },
+  "tool_response": {
+    "filePath": "/home/user/project/p1-note.txt",
+    "oldString": "p1-write-capture",
+    "newString": "p1-edit-capture",
+    "originalFile": "p1-write-capture\n",
+    "structuredPatch": [
+      {
+        "oldStart": 1,
+        "oldLines": 1,
+        "newStart": 1,
+        "newLines": 1,
+        "lines": [
+          "-p1-write-capture",
+          "+p1-edit-capture"
+        ]
+      }
+    ],
+    "userModified": false,
+    "replaceAll": false
+  },
+  "tool_use_id": "toolu_01GhrM6HcenqBVhNErYTNrah",
+  "duration_ms": 4
+}

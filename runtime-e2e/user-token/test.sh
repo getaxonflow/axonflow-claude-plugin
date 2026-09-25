@@ -108,7 +108,7 @@ RUN_T0="$(query "SELECT now();")"
 echo "--- Leg 0: unconfigured (label attribution, developer=$EMAIL0) ---"
 echo "{\"session_id\":\"$SID0\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"rm -rf / --no-preserve-root\"}}" \
   | env -u AXONFLOW_USER_TOKEN HOME="$HOME0" AXONFLOW_USER_EMAIL="$EMAIL0" "$PRE_HOOK" >/dev/null 2>&1
-echo "{\"session_id\":\"$SID0\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+echo "{\"session_id\":\"$SID0\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}}" \
   | env -u AXONFLOW_USER_TOKEN HOME="$HOME0" AXONFLOW_USER_EMAIL="$EMAIL0" "$POST_HOOK" >/dev/null 2>&1
 GATE_ON=true
 ROWS0=$(wait_count "SELECT count(*) FROM audit_logs WHERE session_id='$SID0';" 2)
@@ -224,7 +224,7 @@ echo "{\"session_id\":\"$SID1\",\"tool_name\":\"Bash\",\"tool_input\":{\"command
 mkdir -p "$HOME1/.config/axonflow"
 printf '{"token":"%s"}' "$TOKEN" > "$HOME1/.config/axonflow/user-token.json"
 chmod 600 "$HOME1/.config/axonflow/user-token.json"
-echo "{\"session_id\":\"$SID1\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+echo "{\"session_id\":\"$SID1\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}}" \
   | env -u AXONFLOW_USER_TOKEN HOME="$HOME1" AXONFLOW_USER_EMAIL="$FORGED" "$POST_HOOK" >/dev/null 2>&1
 
 CHK1=$(wait_count "SELECT count(*) FROM audit_logs WHERE request_type='mcp_check_policy' AND user_email='$TOKEN_EMAIL_CANON' AND session_id='$SID1';" 1)
@@ -276,13 +276,13 @@ else
   echo "FAIL: tampered token did not produce a deny: $DECISION"
   errors=$((errors + 1))
 fi
-if printf '%s' "$DECISION" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null | grep -q "per-user token"; then
+if printf '%s' "$DECISION" | jq -r '.hookSpecificOutput.permissionDecisionReason // empty' 2>/dev/null | grep "per-user token" >/dev/null; then
   echo "PASS: deny reason names the per-user token as a likely cause"
 else
   echo "FAIL: deny reason does not mention the per-user token"
   errors=$((errors + 1))
 fi
-if printf '%s' "$DECISION" | grep -qF "$TAMPERED"; then
+if printf '%s' "$DECISION" | grep -F "$TAMPERED" >/dev/null; then
   echo "FAIL: deny output leaked the token value"
   errors=$((errors + 1))
 else

@@ -327,7 +327,7 @@ if [ -n "${TEST_LICENSE_TOKEN:-}" ] && curl -sSf -o /dev/null --max-time 5 "$AGE
       # Disambiguate middleware-reject ("Invalid plugin license token") from
       # any other 401 path. The middleware's exact rejection messages live
       # in platform/agent/plugin_claim_middleware.go.
-      if echo "$RESP_BODY" | grep -qiE 'invalid plugin license token|license not found|license has been revoked'; then
+      if echo "$RESP_BODY" | grep -iE 'invalid plugin license token|license not found|license has been revoked' >/dev/null; then
         echo "  FAIL: PluginClaimMiddleware rejected the token (HTTP 401: $RESP_BODY)"
         errors=$((errors + 1))
       else

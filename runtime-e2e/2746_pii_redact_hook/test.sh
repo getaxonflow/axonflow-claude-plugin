@@ -111,7 +111,7 @@ else
   errors=$((errors + 1))
 fi
 
-if ! echo "$CONTEXT_A" | grep -qF "$NIK"; then
+if ! echo "$CONTEXT_A" | grep -F "$NIK" >/dev/null; then
   echo "✅ PASS case-A: additionalContext does not contain raw NIK"
 else
   echo "❌ FAIL case-A: additionalContext still contains raw NIK '${NIK}'"

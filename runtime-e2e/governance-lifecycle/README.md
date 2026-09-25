@@ -1,21 +1,14 @@
 # governance-lifecycle — runtime integration test
 
-**Asserts:** Claude Code chains multiple W2 tools in a single conversation. Read-only subset (no license required): agent invokes both `search_audit_events` AND `list_overrides` in one prompt, both succeed, and the agent reports a combined result. Full lifecycle (create → list → explain → revoke → list) requires an evaluation+ license to seed an override-able policy; gated on `AXONFLOW_LICENSE` env var.
+**Asserts:** one Claude Code session runs `list_overrides`, `create_override`, `list_overrides`, `delete_override` and `search_audit_events` in order. Both writes answer the retired-write tool error (`LEGACY_POLICY_WRITE_FROZEN: `), the reads answer, the platform's override count (read directly before and after) does not move, and the agent's final message reports exactly that state.
 
-**Why this exists alongside the per-feature tests:** per-feature tests prove each tool dispatches in isolation. This test proves the features cohere — multi-tool sessions don't break, tool results don't confuse the agent into stopping the chain.
+**Why this exists alongside the per-feature tests:** per-feature tests prove each tool dispatches in isolation. This one proves a multi-tool session survives the retired writes: a tool error does not stop the chain, and the agent reports the platform's state rather than an invented one.
 
-**Prereqs:** `claude` CLI on PATH and authenticated; `jq`; live AxonFlow stack reachable at `$AXONFLOW_ENDPOINT`. For the full lifecycle: `AXONFLOW_LICENSE` set.
+**Prereqs:** `claude` CLI on PATH and authenticated; `jq`; a live AxonFlow v11.0.0 stack reachable at `$AXONFLOW_ENDPOINT` (never production: nothing here needs it). The suite presents `X-User-Email` through the plugin's MCP headersHelper (`AXONFLOW_USER_EMAIL`, default `claude-runtime-e2e@axonflow-test.invalid`) and on its own direct calls.
 
-**Required deployment posture:** the override endpoints are scoped to an individual user, so the AxonFlow **agent** must be forwarding a per-user identity. On a default deployment it is not: `AXONFLOW_TRUST_IDENTITY_HEADERS` defaults to **off** (since 9.9.0) and the agent strips `X-User-Email`, so `create_override` returns 401 and this test **fails** with the remediation printed (it used to skip silently and report green — #3062).
-
-```bash
-AXONFLOW_TRUST_IDENTITY_HEADERS=true   # on the AGENT, then restart it
-```
-
-Only enable it when every hop that can reach the agent asserts end-user identity from a validated source — see `docs/security/identity-header-trust.md` in axonflow-enterprise.
+**Required deployment posture:** `AXONFLOW_TRUST_IDENTITY_HEADERS=true` on the AxonFlow **agent**. The override writes are scoped to an individual user, and without a trusted per-user identity the platform refuses them for identity before it answers the retirement, which this suite reports as a failure with the remediation. Only enable it when every hop that can reach the agent asserts end-user identity from a validated source.
 
 **Run:**
 ```bash
-AXONFLOW_ENDPOINT=http://localhost:8080 \
-  bash runtime-e2e/governance-lifecycle/test.sh
+AXONFLOW_ENDPOINT=http://localhost:8080 bash runtime-e2e/governance-lifecycle/test.sh
 ```

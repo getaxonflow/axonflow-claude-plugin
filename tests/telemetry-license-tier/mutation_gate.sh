@@ -92,7 +92,7 @@ expect_mutant() {
   rc=$?
   rm -f "$MUTANT"
 
-  if printf '%s' "$out" | grep -q '^SKIP:'; then
+  if printf '%s' "$out" | grep '^SKIP:' >/dev/null; then
     fail "[$label] matrix skipped instead of running — the gate proved nothing"
     return
   fi

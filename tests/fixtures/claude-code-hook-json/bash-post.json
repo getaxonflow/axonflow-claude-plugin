@@ -1,0 +1,26 @@
+{
+  "session_id": "ff732378-445f-4eaf-9fd4-0c072476f406",
+  "transcript_path": "/home/user/.claude/projects/-home-user-project/ff732378-445f-4eaf-9fd4-0c072476f406.jsonl",
+  "cwd": "/home/user/project",
+  "scratchpad_dir": "/tmp/claude-1000/-home-user-project/SESSION/scratchpad",
+  "prompt_id": "dd1562b5-24e4-46c4-981e-f36e37793924",
+  "permission_mode": "dontAsk",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "echo p1-allow-capture",
+    "description": "Print test string"
+  },
+  "tool_response": {
+    "stdout": "p1-allow-capture",
+    "stderr": "",
+    "interrupted": false,
+    "isImage": false,
+    "noOutputExpected": false
+  },
+  "tool_use_id": "toolu_017asUepdzYKoJQsMs5G9ZUk",
+  "duration_ms": 159
+}

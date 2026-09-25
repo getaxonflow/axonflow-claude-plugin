@@ -82,7 +82,7 @@ echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\
 
 # 2) PostToolUse on an executed command → audit_tool_call → the orchestrator
 #    writes a tool_call_audit row carrying user_email + session_id.
-echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}}" \
   | "$POST_HOOK" >/dev/null 2>&1
 
 query() { psql "$DB_URL" -tAc "$1" 2>/dev/null; }
@@ -144,7 +144,7 @@ echo "{\"session_id\":\"$SID_ABSENT\",\"tool_name\":\"Bash\",\"tool_input\":{\"c
   | ( cd "$ABSENT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$ABSENT_HOME" \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
       "$PRE_HOOK" >/dev/null 2>>"$HOOK_ERR" )
-echo "{\"session_id\":\"$SID_ABSENT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+echo "{\"session_id\":\"$SID_ABSENT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}}" \
   | ( cd "$ABSENT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$ABSENT_HOME" \
       GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
       "$POST_HOOK" >/dev/null 2>>"$HOOK_ERR" )
@@ -203,7 +203,7 @@ echo "{\"session_id\":\"$SID_GIT\",\"tool_name\":\"Bash\",\"tool_input\":{\"comm
   | ( cd "$GIT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$GIT_HOME" \
       GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
       "$PRE_HOOK" >/dev/null 2>>"$GIT_ERR" )
-echo "{\"session_id\":\"$SID_GIT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+echo "{\"session_id\":\"$SID_GIT\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}}" \
   | ( cd "$GIT_HOME" && env -u AXONFLOW_USER_EMAIL HOME="$GIT_HOME" \
       GIT_CONFIG_GLOBAL="$GCFG" GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_NOSYSTEM=1 \
       "$POST_HOOK" >/dev/null 2>>"$GIT_ERR" )

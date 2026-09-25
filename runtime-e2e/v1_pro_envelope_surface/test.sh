@@ -25,7 +25,15 @@
 # subsequent traffic.
 #
 # Usage:
-#   AGENT_URL=https://try.getaxonflow.com bash test.sh
+#   AGENT_URL=<a Community SaaS stack you own> bash test.sh
+#
+# NEVER A DEFAULT TARGET: PRODUCTION. With AGENT_URL unset the suite SKIPs.
+# Against https://try.getaxonflow.com it registers a synthetic tenant by a
+# direct INSERT into that stack's database (through `aws ecs execute-command`
+# on its orchestrator task, with the database password read from AWS Secrets
+# Manager) and deletes its rows on exit, so it SKIPs there unless
+# AXONFLOW_E2E_ALLOW_PRODUCTION=1 is set for the run
+# (runtime-e2e/_lib/claude-runtime.sh, runtime_e2e_refuse_production).
 #
 # Skips cleanly if curl/jq missing or AGENT_URL is unreachable.
 
@@ -35,7 +43,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HELPER="${PLUGIN_DIR}/scripts/upgrade-prompt.sh"
 
-AGENT_URL="${AGENT_URL:-https://try.getaxonflow.com}"
+# shellcheck source=../_lib/claude-runtime.sh
+source "$PLUGIN_DIR/runtime-e2e/_lib/claude-runtime.sh"
+AGENT_URL="${AGENT_URL:-}"
+if [ -z "$AGENT_URL" ]; then
+  echo "SKIP: AGENT_URL is not set (this suite has no default target; see the header)"
+  exit 0
+fi
+runtime_e2e_refuse_production "$AGENT_URL" "inserts a tenant into that stack's database through ECS exec and deletes its rows on exit"
 EXPECTED_WORDING="Pro raises this to 2,000/day"
 EXPECTED_BUY_URL="https://buy.stripe.com/bJe28qbztcdVchjdkw8k800"
 
@@ -230,7 +245,7 @@ fail() { echo "FAIL: $1"; PASS=false; }
 [ "$(jq -r '.limit_type // empty' "$ENVELOPE_BODY")" = "daily_quota" ] || fail "envelope.limit_type not 'daily_quota'"
 [ "$(jq -r '.tier // empty' "$ENVELOPE_BODY")" = "Free" ] || fail "envelope.tier not 'Free'"
 WORD=$(jq -r '.upgrade.wording // empty' "$ENVELOPE_BODY")
-echo "$WORD" | grep -qF "$EXPECTED_WORDING" || fail "envelope.upgrade.wording missing locked phrase '$EXPECTED_WORDING'"
+echo "$WORD" | grep -F "$EXPECTED_WORDING" >/dev/null || fail "envelope.upgrade.wording missing locked phrase '$EXPECTED_WORDING'"
 [ "$(jq -r '.upgrade.buy_url // empty' "$ENVELOPE_BODY")" = "$EXPECTED_BUY_URL" ] || fail "envelope.upgrade.buy_url unexpected"
 
 H_TIER=$(grep -i '^x-axonflow-tier-limit:' "$ENVELOPE_HEADERS" | tr -d '\r' | awk '{print $2}')

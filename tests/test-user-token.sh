@@ -77,7 +77,7 @@ if [ -z "$OUT" ]; then
 else
   fail "0644 file was loaded: $OUT"
 fi
-printf '%s' "$ERR" | grep -q "unsafe permissions" \
+printf '%s' "$ERR" | grep "unsafe permissions" >/dev/null \
   && pass "0644 rejection warns on stderr" \
   || fail "no unsafe-permissions warning on stderr: $ERR"
 chmod 600 "$WORK/home1/.config/axonflow/user-token.json"
@@ -91,7 +91,7 @@ for bad in 'tok with space' 'tok"quote' 'tok\backslash' "$(printf 'tok\nnewline'
     fail "malformed env token was resolved: $OUT"
     continue
   fi
-  if printf '%s' "$ERR" | grep -qF "tok"; then
+  if printf '%s' "$ERR" | grep -F "tok" >/dev/null; then
     fail "diagnostic leaked the token value: $ERR"
   else
     pass "malformed env token dropped without leaking its value"
@@ -109,7 +109,7 @@ if [ -z "$OUT" ]; then
 else
   fail "malformed file token was resolved: $OUT"
 fi
-printf '%s' "$ERR" | grep -qF "line1" \
+printf '%s' "$ERR" | grep -F "line1" >/dev/null \
   && fail "file diagnostic leaked the token value" \
   || pass "file diagnostic does not leak the token value"
 

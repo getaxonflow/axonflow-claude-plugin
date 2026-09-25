@@ -313,7 +313,7 @@ SYM_DIAG=$( env -u AXONFLOW_USER_EMAIL HOME=/nonexistent-axonflow-$$ TMPDIR="$SY
   bash -c '. "'"$SCRIPT_PATH"'"; _axonflow_find_git() { return 1; }; resolve_user_identity' 2>&1 )
 SYM_MODE="$(stat -c %a "$SYM_TARGET" 2>/dev/null || stat -f %Lp "$SYM_TARGET" 2>/dev/null)"
 if [ "$SYM_MODE" = "755" ] && [ ! -e "$SYM_TARGET/identity-fallback-notice-shown" ] \
-   && printf '%s' "$SYM_DIAG" | grep -q "No developer identity resolved"; then
+   && printf '%s' "$SYM_DIAG" | grep "No developer identity resolved" >/dev/null; then
   pass "symlink at tmp stamp path refused → target untouched, notice still fires"
 else
   fail "symlink-hygiene case: target mode=$SYM_MODE (want 755), stamp-planted=$([ -e "$SYM_TARGET/identity-fallback-notice-shown" ] && echo yes || echo no), diag='$SYM_DIAG'"

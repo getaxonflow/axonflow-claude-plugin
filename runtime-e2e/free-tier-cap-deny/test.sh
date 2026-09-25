@@ -17,6 +17,11 @@ PRE_HOOK="$PLUGIN_DIR/scripts/pre-tool-check.sh"
 POST_HOOK="$PLUGIN_DIR/scripts/post-tool-audit.sh"
 
 ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
+# Production Community SaaS is never a target by default: this suite registers
+# a Free tenant at ENDPOINT and drives it past its per-minute limit.
+# shellcheck source=../_lib/claude-runtime.sh
+source "$PLUGIN_DIR/runtime-e2e/_lib/claude-runtime.sh"
+runtime_e2e_refuse_production "$ENDPOINT" "registers a Free tenant there and drives it past its per-minute limit"
 MAX_CALLS="${AXONFLOW_E2E_CAP_MAX_CALLS:-60}"
 EVIDENCE="${AXONFLOW_E2E_EVIDENCE_DIR:-$(mktemp -d -t free-tier-cap-deny.XXXXXX)}"
 
@@ -92,7 +97,7 @@ fire() {
 }
 
 pre_json() { jq -nc --arg c "$1" '{tool_name: "Bash", tool_input: {command: $c}, session_id: "free-tier-cap-deny"}'; }
-post_json() { jq -nc --arg o "$1" '{tool_name: "Bash", tool_input: {command: "cat notes.txt"}, tool_response: {stdout: $o, exitCode: 0}, session_id: "free-tier-cap-deny"}'; }
+post_json() { jq -nc --arg o "$1" '{tool_name: "Bash", tool_input: {command: "cat notes.txt"}, tool_response: {stdout: $o, stderr: "", interrupted: false, isImage: false, noOutputExpected: false}, session_id: "free-tier-cap-deny"}'; }
 # Claude Code blocks on a permissionDecision "deny" object on stdout (exit 0).
 is_block() { [ "$(cat "$EVIDENCE/$1.rc")" = 0 ] && jq -e '.hookSpecificOutput.permissionDecision == "deny"' "$EVIDENCE/$1.stdout" >/dev/null 2>&1; }
 block_reason() { jq -r '.hookSpecificOutput.permissionDecisionReason // empty' "$EVIDENCE/$1.stdout" 2>/dev/null; }
@@ -193,7 +198,7 @@ if [ -n "$BLOCK_TAG" ]; then
   echo ""
   echo "--- 4. while the back-off holds ---"
   fire "$PRE_HOOK" pre-held "$CACHE1" "$(pre_json "echo free-tier-cap-deny held")"
-  if is_block pre-held && block_reason pre-held | grep -qF "$LIMIT_REASON"; then
+  if is_block pre-held && block_reason pre-held | grep -F "$LIMIT_REASON" >/dev/null; then
     pass "the pre hook blocks while the back-off holds"
   else
     fail "the pre hook did not block while the back-off holds (exit $(cat "$EVIDENCE/pre-held.rc"))"

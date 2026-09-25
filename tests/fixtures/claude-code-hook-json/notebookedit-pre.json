@@ -1,0 +1,19 @@
+{
+  "session_id": "7e2ac26d-7ef3-4da6-8d17-2f3258a00d30",
+  "transcript_path": "/home/user/.claude/projects/-home-user-project/7e2ac26d-7ef3-4da6-8d17-2f3258a00d30.jsonl",
+  "cwd": "/home/user/project",
+  "scratchpad_dir": "/tmp/claude-1000/-home-user-project/SESSION/scratchpad",
+  "prompt_id": "438bf0ee-3d0a-438d-8f3d-543f7d17ce72",
+  "permission_mode": "dontAsk",
+  "effort": {
+    "level": "high"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "NotebookEdit",
+  "tool_input": {
+    "notebook_path": "/home/user/project/p1-nb.ipynb",
+    "cell_id": "c1",
+    "new_source": "print('p1-notebook-capture')"
+  },
+  "tool_use_id": "toolu_01HoBKd8ZE1yazA94ZLwivp1"
+}

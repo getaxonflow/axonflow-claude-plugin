@@ -1,19 +1,12 @@
 # revoke-override — runtime E2E
 
-**Asserts:** Claude Code dispatches `mcp__plugin_axonflow_axonflow__delete_override` (the platform-side name for the revoke action) with a fabricated `override_id`. Platform returns 404; agent surfaces the not-found result via `SMOKE_RESULT:` marker. Happy-path revoke (real override created in the same session) lives in `../governance-lifecycle/test.sh`.
+**Asserts:** `delete_override` answers the retired write on AxonFlow v11.0.0. Directly, MCP `delete_override` with `X-User-Email` answers a tool error beginning `LEGACY_POLICY_WRITE_FROZEN: ` and REST `DELETE /api/v1/overrides/<id>` answers HTTP 409. Through Claude Code, the agent invokes `mcp__plugin_axonflow_axonflow__delete_override` and receives that tool error, its final message reports `frozen: true`, and the `list_overrides` count does not move. No override is seeded: none can be created on v11.0.0.
 
-**Prereqs:** `claude` CLI on PATH and authenticated; `jq`; live AxonFlow stack reachable at `$AXONFLOW_ENDPOINT`.
+**Prereqs:** `claude` CLI on PATH and authenticated; `jq`; a live AxonFlow v11.0.0 stack reachable at `$AXONFLOW_ENDPOINT` (never production: nothing here needs it). The suite presents `X-User-Email` through the plugin's MCP headersHelper (`AXONFLOW_USER_EMAIL`, default `claude-runtime-e2e@axonflow-test.invalid`) and on its own direct calls.
 
-**Required deployment posture:** the override endpoints are scoped to an individual user, so the AxonFlow **agent** must be forwarding a per-user identity. On a default deployment it is not: `AXONFLOW_TRUST_IDENTITY_HEADERS` defaults to **off** (since 9.9.0) and the agent strips `X-User-Email`, so `create_override` returns 401 and this test **fails** with the remediation printed (it used to skip silently and report green — #3062).
-
-```bash
-AXONFLOW_TRUST_IDENTITY_HEADERS=true   # on the AGENT, then restart it
-```
-
-Only enable it when every hop that can reach the agent asserts end-user identity from a validated source — see `docs/security/identity-header-trust.md` in axonflow-enterprise.
+**Required deployment posture:** `AXONFLOW_TRUST_IDENTITY_HEADERS=true` on the AxonFlow **agent**. The override writes are scoped to an individual user, and without a trusted per-user identity the platform refuses them for identity before it answers the retirement, which this suite reports as a failure with the remediation. Only enable it when every hop that can reach the agent asserts end-user identity from a validated source.
 
 **Run:**
 ```bash
-AXONFLOW_ENDPOINT=http://localhost:8080 \
-  bash runtime-e2e/revoke-override/test.sh
+AXONFLOW_ENDPOINT=http://localhost:8080 bash runtime-e2e/revoke-override/test.sh
 ```

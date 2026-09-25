@@ -86,7 +86,7 @@ echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\
 
 # 2) PostToolUse on an executed command → the main audit_tool_call POST
 #    (post-tool-audit.sh ~line 154) fires with caller_name: "claude_code".
-echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"exitCode\":0}}" \
+echo "{\"session_id\":\"$SID\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"echo hi\"},\"tool_response\":{\"stdout\":\"hi\",\"stderr\":\"\",\"interrupted\":false,\"isImage\":false,\"noOutputExpected\":false}}" \
   | "$POST_HOOK" >/dev/null 2>&1
 
 query() { psql "$DB_URL" -tAc "$1" 2>/dev/null; }
@@ -127,13 +127,16 @@ else
   errors=$((errors + 1))
 fi
 
-# The main PostToolUse audit row (from post-tool-audit.sh): success:true,
-# caller_name present, tool_type absent.
-MAIN=$(query "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND session_id='$SID' AND policy_details->>'success'='true' AND policy_details->>'caller_name'='claude_code' AND NOT (policy_details ? 'tool_type');")
+# The main PostToolUse audit row (from post-tool-audit.sh): caller_name
+# present, tool_type absent, and NO success key. The hook JSON above is the
+# shape Claude Code sends for Bash (tests/fixtures/claude-code-hook-json/),
+# which carries no exit status, so the record claims none (it used to claim
+# success:true for every Bash call).
+MAIN=$(query "SELECT count(*) FROM audit_logs WHERE request_type='tool_call_audit' AND session_id='$SID' AND NOT (policy_details ? 'success') AND policy_details->>'caller_name'='claude_code' AND NOT (policy_details ? 'tool_type');")
 if [ "${MAIN:-0}" -ge 1 ]; then
-  echo "PASS: post-tool-audit.sh main audit row carries caller_name=claude_code, no tool_type"
+  echo "PASS: post-tool-audit.sh main audit row carries caller_name=claude_code, no tool_type, no success claim"
 else
-  echo "FAIL: no main tool_call_audit row with caller_name=claude_code and no tool_type for session_id=$SID"
+  echo "FAIL: no main tool_call_audit row with caller_name=claude_code, no tool_type and no success key for session_id=$SID"
   errors=$((errors + 1))
 fi
 

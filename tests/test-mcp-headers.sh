@@ -36,7 +36,7 @@ HH="$(jq -r '.mcpServers.axonflow.headersHelper // empty' "$MCP_JSON")"
 URL="$(jq -r '.mcpServers.axonflow.url // empty' "$MCP_JSON")"
 
 # 2) The url MUST still use ${AXONFLOW_ENDPOINT} (env expansion IS supported there).
-if printf '%s' "$URL" | grep -q 'AXONFLOW_ENDPOINT'; then
+if printf '%s' "$URL" | grep 'AXONFLOW_ENDPOINT' >/dev/null; then
   echo "PASS: url honors \${AXONFLOW_ENDPOINT}"
 else
   echo "FAIL: url no longer references \${AXONFLOW_ENDPOINT}: $URL"; fail=1
@@ -46,7 +46,7 @@ fi
 #    (unexpanded there) or any plugin-relative path.
 if [ -z "$HH" ]; then
   echo "FAIL: headersHelper missing from .mcp.json"; fail=1
-elif printf '%s' "$HH" | grep -q 'CLAUDE_PLUGIN_ROOT'; then
+elif printf '%s' "$HH" | grep 'CLAUDE_PLUGIN_ROOT' >/dev/null; then
   echo "FAIL: headersHelper references \${CLAUDE_PLUGIN_ROOT} — Claude Code will not expand it (the original bug)"; fail=1
 else
   echo "PASS: headersHelper is path-independent (no \${CLAUDE_PLUGIN_ROOT})"

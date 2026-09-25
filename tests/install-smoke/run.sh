@@ -45,7 +45,7 @@ pass() { echo "  PASS: $1"; PASS=$((PASS+1)); }
 
 # 1. Stage the plugin's install payload.
 echo "stage to $STAGE_DIR"
-mkdir -p "$STAGE_DIR/.claude-plugin" "$STAGE_DIR/hooks" "$STAGE_DIR/scripts"
+mkdir -p "$STAGE_DIR/.claude-plugin" "$STAGE_DIR/hooks" "$STAGE_DIR/scripts/lib"
 cp -p "$PLUGIN_DIR/.claude-plugin/plugin.json" "$STAGE_DIR/.claude-plugin/" \
   || fail "missing .claude-plugin/plugin.json"
 cp -p "$PLUGIN_DIR/.mcp.json" "$STAGE_DIR/" \
@@ -54,6 +54,9 @@ cp -p "$PLUGIN_DIR/hooks/hooks.json" "$STAGE_DIR/hooks/" \
   || fail "missing hooks/hooks.json"
 cp -p "$PLUGIN_DIR/scripts/"*.sh "$STAGE_DIR/scripts/" \
   || fail "missing scripts/*.sh"
+# The failure-posture table both hooks source (without it they block, naming it).
+cp -p "$PLUGIN_DIR/scripts/lib/"*.sh "$STAGE_DIR/scripts/lib/" \
+  || fail "missing scripts/lib/*.sh"
 chmod +x "$STAGE_DIR/scripts/"*.sh
 
 # 2. Validate file list.
@@ -62,7 +65,7 @@ for f in .claude-plugin/plugin.json .mcp.json hooks/hooks.json \
          scripts/telemetry-ping.sh scripts/mcp-auth-headers.sh \
          scripts/license-token.sh scripts/login.sh \
          scripts/recover.sh scripts/recover-verify.sh \
-         scripts/status.sh; do
+         scripts/status.sh scripts/lib/failure-posture.sh; do
   if [ -f "$STAGE_DIR/$f" ]; then pass "staged $f"
   else fail "missing $f after stage"
   fi
@@ -105,15 +108,15 @@ STATUS_OUT=$(AXONFLOW_LICENSE_TOKEN='' \
   HOME="$STATUS_TMP" \
   AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
   "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
-if echo "$STATUS_OUT" | grep -q "tier=Free (no Pro license configured)"; then
+if echo "$STATUS_OUT" | grep "tier=Free (no Pro license configured)" >/dev/null; then
   pass "status.sh Free-tier line shape"
 else
   fail "status.sh Free-tier line missing expected shape; output: $STATUS_OUT"
 fi
-if echo "$STATUS_OUT" | grep -q "license_token=unset"; then pass "status.sh prints license_token=unset on Free"
+if echo "$STATUS_OUT" | grep "license_token=unset" >/dev/null; then pass "status.sh prints license_token=unset on Free"
 else fail "status.sh missing 'license_token=unset': $STATUS_OUT"
 fi
-if echo "$STATUS_OUT" | grep -q "upgrade_url="; then pass "status.sh prints upgrade_url on Free"
+if echo "$STATUS_OUT" | grep "upgrade_url=" >/dev/null; then pass "status.sh prints upgrade_url on Free"
 else fail "status.sh missing upgrade_url: $STATUS_OUT"
 fi
 
@@ -125,12 +128,12 @@ PRO_OUT=$(AXONFLOW_LICENSE_TOKEN="$PRO_TOKEN" \
   HOME="$STATUS_TMP" \
   AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
   "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
-if echo "$PRO_OUT" | grep -qE "tier=Pro \(expires [0-9]{4}-[0-9]{2}-[0-9]{2}, [0-9]+ days remaining\)"; then
+if echo "$PRO_OUT" | grep -E "tier=Pro \(expires [0-9]{4}-[0-9]{2}-[0-9]{2}, [0-9]+ days remaining\)" >/dev/null; then
   pass "status.sh Pro-active line shape (expires YYYY-MM-DD, N days remaining)"
 else
   fail "status.sh Pro-active line missing expected shape; output: $PRO_OUT"
 fi
-if echo "$PRO_OUT" | grep -qF "$PRO_TOKEN"; then
+if echo "$PRO_OUT" | grep -F "$PRO_TOKEN" >/dev/null; then
   fail "status.sh leaked the full token to stdout — bearer credential MUST be redacted"
 else
   pass "status.sh redacts full license token (no full-token leak)"
@@ -139,7 +142,7 @@ fi
 # chars are "g-pa". Use a substring match so the test isn't sensitive to
 # the exact tail (any future tweak to the placeholder still passes).
 PRO_TAIL4="${PRO_TOKEN: -4}"
-if echo "$PRO_OUT" | grep -qF "AXON-...${PRO_TAIL4}"; then
+if echo "$PRO_OUT" | grep -F "AXON-...${PRO_TAIL4}" >/dev/null; then
   pass "status.sh shows last-4-chars preview (AXON-...${PRO_TAIL4})"
 else
   fail "status.sh missing last-4-chars token preview: $PRO_OUT"
@@ -153,12 +156,12 @@ EXPIRED_OUT=$(AXONFLOW_LICENSE_TOKEN="$EXPIRED_TOKEN" \
   HOME="$STATUS_TMP" \
   AXONFLOW_CONFIG_DIR="$STATUS_TMP/empty" \
   "$STAGE_DIR/scripts/status.sh" 2>/dev/null || true)
-if echo "$EXPIRED_OUT" | grep -qE "tier=Free \(Pro expired [0-9]{4}-[0-9]{2}-[0-9]{2} — visit https?://[^ ]+ to renew\)"; then
+if echo "$EXPIRED_OUT" | grep -E "tier=Free \(Pro expired [0-9]{4}-[0-9]{2}-[0-9]{2} — visit https?://[^ ]+ to renew\)" >/dev/null; then
   pass "status.sh Pro-expired line shape (Pro expired YYYY-MM-DD — visit ... to renew)"
 else
   fail "status.sh Pro-expired line missing expected shape; output: $EXPIRED_OUT"
 fi
-if echo "$EXPIRED_OUT" | grep -qF "$EXPIRED_TOKEN"; then
+if echo "$EXPIRED_OUT" | grep -F "$EXPIRED_TOKEN" >/dev/null; then
   fail "status.sh leaked expired token to stdout"
 else
   pass "status.sh redacts expired token"
@@ -211,16 +214,16 @@ ENDPOINT="http://127.0.0.1:$PORT"
 # a real ping to checkpoint.getaxonflow.com.
 DENY_INPUT='{"tool_name":"Bash","tool_input":{"command":"DROP TABLE users; --"}}'
 DENY_OUTPUT=$(echo "$DENY_INPUT" | AXONFLOW_ENDPOINT="$ENDPOINT" AXONFLOW_TELEMETRY=off "$HOOK" 2>/dev/null || true)
-if echo "$DENY_OUTPUT" | grep -q '"deny"'; then pass "deny path returns deny decision"
+if echo "$DENY_OUTPUT" | grep '"deny"' >/dev/null; then pass "deny path returns deny decision"
 else fail "deny path missing deny decision: $DENY_OUTPUT"
 fi
-if echo "$DENY_OUTPUT" | grep -q "decision: dec_test_deny_001"; then pass "deny path surfaces decision_id"
+if echo "$DENY_OUTPUT" | grep "decision: dec_test_deny_001" >/dev/null; then pass "deny path surfaces decision_id"
 else fail "deny path missing decision_id"
 fi
-if echo "$DENY_OUTPUT" | grep -q "risk: high"; then pass "deny path surfaces risk_level"
+if echo "$DENY_OUTPUT" | grep "risk: high" >/dev/null; then pass "deny path surfaces risk_level"
 else fail "deny path missing risk_level"
 fi
-if echo "$DENY_OUTPUT" | grep -q "override available"; then pass "deny path surfaces override_available"
+if echo "$DENY_OUTPUT" | grep "override available" >/dev/null; then pass "deny path surfaces override_available"
 else fail "deny path missing override_available"
 fi
 

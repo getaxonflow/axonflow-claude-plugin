@@ -208,7 +208,7 @@ fi
 # legitimately coincide on some deployments, so this asserts only that the
 # local classification was not REPLACED by the platform's answer.
 PDM=$(ping_show platform_deployment_mode)
-LOCAL_EXPECTED=$(printf '%s' "$AXONFLOW_ENDPOINT" | grep -qE 'try\.getaxonflow\.com' && printf 'community_saas' || printf 'self_hosted')
+LOCAL_EXPECTED=$(printf '%s' "$AXONFLOW_ENDPOINT" | grep -E 'try\.getaxonflow\.com' >/dev/null && printf 'community_saas' || printf 'self_hosted')
 if [ "$DM" = "$LOCAL_EXPECTED" ]; then
   echo "PASS: deployment_mode stayed this plugin's own classification ($DM); platform_deployment_mode=$PDM"
 else

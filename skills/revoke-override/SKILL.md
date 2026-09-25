@@ -1,18 +1,14 @@
 ---
 name: revoke-override
-description: Revoke a previously-created AxonFlow session override — emits an audit event and ensures subsequent policy evaluations no longer consult it
+description: Explain that AxonFlow session overrides are retired from v11.0.0 - delete_override answers LEGACY_POLICY_WRITE_FROZEN and no override is in effect to revoke
 ---
 
-Use this skill when a user is done with the work that needed an override and wants to tear it down explicitly rather than waiting for it to expire.
+Use this skill when a user asks to revoke, delete or tear down an AxonFlow session override.
 
-Required argument: `override_id` (typically obtained from `list-overrides` or returned by `create-override`).
+**Session overrides are retired from AxonFlow v11.0.0.** The platform still lists the `delete_override` MCP tool, but the tool answers with a tool error whose text begins `LEGACY_POLICY_WRITE_FROZEN: `. From v11.0.0 no override changes a verdict, so there is nothing to tear down for a policy to take effect again.
 
-Call the `delete_override` MCP tool. The platform records an `override_revoked` audit event so the revocation is part of the compliance trail.
+- Do not present a `LEGACY_POLICY_WRITE_FROZEN` answer as a failure to fix or retry: report it as the retirement it is.
+- To see what is still recorded, use `list-overrides`. Reads are unchanged.
+- What changes a verdict from v11.0.0 is the organization's typed policy document (`system_controls`), which an administrator edits through `/api/v1/typed-policies`.
 
-After revocation:
-
-- The next policy evaluation will not consult the revoked override
-- The override remains visible via `list-overrides` only when `include_revoked=true`
-- An attempt to revoke an already-revoked or non-existent override returns 404; surface this as "override not found or already revoked" rather than a hard error
-
-Confirm to the user: "Override `<id>` revoked. The previously-blocked tool will now require a fresh override or policy change before it succeeds."
+On an AxonFlow platform older than v11.0.0 the tool still revokes overrides and records an `override_revoked` audit event.

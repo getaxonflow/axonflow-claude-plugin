@@ -85,7 +85,7 @@ FREE_OUT=$(AXONFLOW_LICENSE_TOKEN='' \
   HOME="$TMP_HOME" \
   AXONFLOW_CONFIG_DIR="$TMP_HOME/empty" \
   bash "$STATUS_SH" 2>&1 || true)
-if echo "$FREE_OUT" | grep -q "tier=Free (no Pro license configured)"; then
+if echo "$FREE_OUT" | grep "tier=Free (no Pro license configured)" >/dev/null; then
   pass "Free tier-line shape (no Pro license configured)"
 else
   fail "Free tier-line missing expected shape; got:"
@@ -103,21 +103,21 @@ PRO_OUT=$(AXONFLOW_LICENSE_TOKEN="$PRO_TOKEN" \
   HOME="$TMP_HOME" \
   AXONFLOW_CONFIG_DIR="$TMP_HOME/empty" \
   bash "$STATUS_SH" 2>&1 || true)
-if echo "$PRO_OUT" | grep -qE "tier=Pro \(expires [0-9]{4}-[0-9]{2}-[0-9]{2}, [0-9]+ days remaining\)"; then
+if echo "$PRO_OUT" | grep -E "tier=Pro \(expires [0-9]{4}-[0-9]{2}-[0-9]{2}, [0-9]+ days remaining\)" >/dev/null; then
   pass "Pro-active tier-line shape (expires YYYY-MM-DD, N days remaining)"
 else
   fail "Pro-active tier-line missing expected shape; got:"
   echo "$PRO_OUT" | sed 's/^/      /'
 fi
 # Token-leak guard: full token must NEVER appear in stdout.
-if echo "$PRO_OUT" | grep -qF "$PRO_TOKEN"; then
+if echo "$PRO_OUT" | grep -F "$PRO_TOKEN" >/dev/null; then
   fail "Pro-active output leaked full token"
 else
   pass "Pro-active output redacts full token"
 fi
 # Last-4 redaction: the AXON-...XXXX preview shows up.
 PRO_TAIL4="${PRO_TOKEN: -4}"
-if echo "$PRO_OUT" | grep -qF "AXON-...${PRO_TAIL4}"; then
+if echo "$PRO_OUT" | grep -F "AXON-...${PRO_TAIL4}" >/dev/null; then
   pass "Pro-active output shows last-4 redacted preview (AXON-...${PRO_TAIL4})"
 else
   fail "Pro-active output missing last-4 preview"
@@ -134,19 +134,19 @@ EXPIRED_OUT=$(AXONFLOW_LICENSE_TOKEN="$EXPIRED_TOKEN" \
   HOME="$TMP_HOME" \
   AXONFLOW_CONFIG_DIR="$TMP_HOME/empty" \
   bash "$STATUS_SH" 2>&1 || true)
-if echo "$EXPIRED_OUT" | grep -qE "tier=Free \(Pro expired [0-9]{4}-[0-9]{2}-[0-9]{2} — visit https?://[^ ]+ to renew\)"; then
+if echo "$EXPIRED_OUT" | grep -E "tier=Free \(Pro expired [0-9]{4}-[0-9]{2}-[0-9]{2} — visit https?://[^ ]+ to renew\)" >/dev/null; then
   pass "Pro-expired tier-line shape (Pro expired YYYY-MM-DD — visit ... to renew)"
 else
   fail "Pro-expired tier-line missing expected shape; got:"
   echo "$EXPIRED_OUT" | sed 's/^/      /'
 fi
-if echo "$EXPIRED_OUT" | grep -qF "$EXPIRED_TOKEN"; then
+if echo "$EXPIRED_OUT" | grep -F "$EXPIRED_TOKEN" >/dev/null; then
   fail "Pro-expired output leaked full token"
 else
   pass "Pro-expired output redacts full token"
 fi
 # The renew CTA inline help block must appear so users know what to do next.
-if echo "$EXPIRED_OUT" | grep -q "After renewal, run /axonflow-login --token"; then
+if echo "$EXPIRED_OUT" | grep "After renewal, run /axonflow-login --token" >/dev/null; then
   pass "Pro-expired output surfaces the /axonflow-login renewal hint"
 else
   fail "Pro-expired output missing /axonflow-login renewal hint"
