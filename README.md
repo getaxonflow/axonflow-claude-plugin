@@ -110,7 +110,7 @@ Outgrown Community on a real plugin install? Evaluation unlocks the capacity and
 | Evidence export (CSV/JSON) | — | 5,000 records · 14d window · 3/day | Unlimited |
 | Policy simulation | — | 300/day | Unlimited |
 
-Org-wide policies are **Enterprise-only**, the actual upgrade trigger for plugin users. Session overrides are retired from AxonFlow v11.0.0 in every edition (see [the MCP tools](#decision-explainability--session-overrides-4)).
+Org-wide policies (an org-root policy that binds every tenant) are capped at 20 on Community and 50 on Evaluation, unlimited on Enterprise. Session overrides are retired from AxonFlow v11.0.0 in every edition (see [the MCP tools](#decision-explainability--session-overrides-4)).
 
 [Get a free Plugin Evaluation license](https://getaxonflow.com/plugins/evaluation-license?utm_source=readme_plugin_claude_eval)
 
@@ -231,7 +231,7 @@ When the plugin's hooks hit a Free-tier cap (200 events/day, 2 active custom pol
 [AxonFlow] Upgrade: https://buy.stripe.com/bJe28qbztcdVchjdkw8k800
 ```
 
-The plugin also stamps the shared back-off file (below). A request-rate limit (`daily_quota`, `per_minute`) blocks governed calls locally, with no request sent, for at most 300 seconds after it was stamped; then the plugin asks the platform again, which answers the limit again if it still holds. A feature or object-count limit (`feature_pro_only`, `active_policies`, `hitl_approvals_window`, `decision_list_size`) shows its nudge and blocks nothing beyond the call it answered. The upgrade nudge is shown at most once per UTC day so it doesn't spam every hook.
+The plugin also stamps the shared back-off file (below). A request-rate limit (`daily_quota`, `per_minute`) blocks governed calls locally, with no request sent, for at most 300 seconds after it was stamped; then the plugin asks the platform again, which answers the limit again if it still holds. A feature or object-count limit (`feature_pro_only`, `hitl_approvals_window`, `decision_list_size`) shows its nudge and blocks nothing beyond the call it answered. The upgrade nudge is shown at most once per UTC day so it doesn't spam every hook.
 
 ---
 
