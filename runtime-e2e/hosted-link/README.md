@@ -1,0 +1,5 @@
+# Hosted link real-stack proof
+
+With an exact staging stack and public TLS/DNS available, set both origins and run `bash runtime-e2e/hosted-link/test.sh`. Approve its printed code in the signed-in staging Portal. The script links a fresh temporary installation, checks mode `0600` storage and secret-free output, sources the plugin's local environment setup, and calls the actual pre-tool hook against the staging Agent. It accepts only the exact `try-staging` origins and removes the temporary credential on exit.
+
+This probe requires a paid staging tenant eligible to approve an API client link. It was not run in the first #4487 staging window because that stack was already deleted before this plugin change.

@@ -45,6 +45,9 @@ jobs:
           ./tests/test-hooks.sh
           ./tests/test-pep-handshake.sh
 
+      - name: Run Hosted link and credential tests
+        run: bash tests/test-hosted-link.sh
+
       - name: Run upgrade-prompt envelope-handler unit tests
         run: |
           chmod +x tests/test-upgrade-prompt.sh

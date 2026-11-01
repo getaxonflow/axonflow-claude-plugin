@@ -10,7 +10,19 @@
 # Exit 0 + no output = allow (no opinion)
 # Exit 0 + JSON with permissionDecision:"allow" = explicit allow
 
-# Fail-open: if anything goes wrong, allow the tool call
+# A Hosted hook without its dependencies cannot check a governed call.
+case "${AXONFLOW_ENDPOINT:-}" in
+  ""|https://try.getaxonflow.com|https://try-staging.getaxonflow.com)
+    if [ -z "${AXONFLOW_AUTH:-}" ] || [ -n "${AXONFLOW_ENDPOINT:-}" ]; then
+      if ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"AxonFlow governance is blocked: install jq and curl before using Hosted."}}'
+        exit 0
+      fi
+    fi
+    ;;
+esac
+
+# Preserve the existing self-hosted fail behavior when dependencies are absent.
 if ! command -v jq &>/dev/null; then
   exit 0
 fi
@@ -34,6 +46,9 @@ else
   ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
   AXONFLOW_MODE="self-hosted"
 fi
+case "$ENDPOINT" in
+  https://try.getaxonflow.com|https://try-staging.getaxonflow.com) AXONFLOW_MODE="community-saas" ;;
+esac
 AUTH="${AXONFLOW_AUTH:-}"
 REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-8}"
 export AXONFLOW_MODE
@@ -44,9 +59,8 @@ export AXONFLOW_MODE
 # talking to.
 echo "[AxonFlow] Connected to AxonFlow at ${ENDPOINT} (mode=${AXONFLOW_MODE})" >&2
 
-# Community-SaaS bootstrap: register with try.getaxonflow.com on first run and
-# load the resulting Basic-auth credential into AXONFLOW_AUTH. No-op when the
-# user has set explicit config (AXONFLOW_MODE != community-saas).
+# Load an existing protected Hosted credential. Fresh installations must
+# complete Portal verification and explicit device linking first.
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 AUTH="${AXONFLOW_AUTH:-}"
@@ -92,6 +106,9 @@ axonflow_pre_deny() {
   jq -n --arg r "$1" '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}'
   exit 0
 }
+if [ "$AXONFLOW_MODE" = "community-saas" ] && [ -z "$AUTH" ]; then
+  axonflow_pre_deny "AxonFlow governance is blocked until this installation is linked. Open https://portal.try.getaxonflow.com/hosted/start, run scripts/hosted-link.mjs, approve the code, then restart Claude Code."
+fi
 
 # Build auth header array safely (avoids word-splitting)
 AUTH_HEADER=()

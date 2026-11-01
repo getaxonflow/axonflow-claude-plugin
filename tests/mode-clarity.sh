@@ -32,6 +32,7 @@ SCENARIO_NAMES=(
   "explicit-endpoint-no-auth"
   "explicit-auth-no-endpoint"
   "both-set"
+  "linked-hosted"
 )
 SCENARIO_ENVS=(
   ""
@@ -39,6 +40,7 @@ SCENARIO_ENVS=(
   "AXONFLOW_ENDPOINT=http://my-self-host:9000"
   "AXONFLOW_AUTH=Y3M6c2VjcmV0"
   "AXONFLOW_ENDPOINT=http://my-self-host:9000 AXONFLOW_AUTH=Y3M6c2VjcmV0"
+  "AXONFLOW_ENDPOINT=https://try.getaxonflow.com AXONFLOW_AUTH=Y3M6c2VjcmV0"
 )
 EXPECTED_URLS=(
   "https://try.getaxonflow.com"
@@ -46,6 +48,7 @@ EXPECTED_URLS=(
   "http://my-self-host:9000"
   "http://localhost:8080"
   "http://my-self-host:9000"
+  "https://try.getaxonflow.com"
 )
 EXPECTED_MODES=(
   "community-saas"
@@ -53,6 +56,7 @@ EXPECTED_MODES=(
   "self-hosted"
   "self-hosted"
   "self-hosted"
+  "community-saas"
 )
 
 # Anti-spoof URL parser. Compare scheme + host + port, not substring —

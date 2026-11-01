@@ -24,6 +24,9 @@ else
   ENDPOINT="${AXONFLOW_ENDPOINT:-http://localhost:8080}"
   AXONFLOW_MODE="self-hosted"
 fi
+case "$ENDPOINT" in
+  https://try.getaxonflow.com|https://try-staging.getaxonflow.com) AXONFLOW_MODE="community-saas" ;;
+esac
 export AXONFLOW_MODE
 REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-5}"
 
@@ -34,6 +37,9 @@ REQUEST_TIMEOUT_SECONDS="${AXONFLOW_TIMEOUT_SECONDS:-5}"
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 AUTH="${AXONFLOW_AUTH:-}"
+if [ "$AXONFLOW_MODE" = "community-saas" ] && [ -z "$AUTH" ]; then
+  exit 0
+fi
 
 # Self-hosted / Enterprise credential resolution (axonflow-claude-plugin#94) —
 # mirror pre-tool-check.sh so both hooks and the inline MCP headersHelper agree

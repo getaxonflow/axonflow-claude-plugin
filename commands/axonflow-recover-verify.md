@@ -9,7 +9,9 @@ Argument: $ARGUMENTS
 
 Parse the argument as `<token>`. Tokens are 64-character hex strings. If missing or shorter than 32 characters, ask the user for the token they received in the magic-link email — they should copy the `token=…` value from the URL, not the URL itself.
 
-Then run the plugin's `recover-verify.sh` helper using the `Bash` tool. The helper POSTs to `/api/v1/recover/verify` with `Content-Type: application/json` (programmatic flow — no HTML page in the loop), validates the response shape, and persists the new credentials atomically to `~/.config/axonflow/try-registration.json` (mode 0600 inside a 0700 directory — same file the Community-SaaS bootstrap reads on every hook invocation).
+This command recovers a legacy registration. A Hosted linked installation uses a separate `hosted-claude-code.json` credential; re-run `scripts/hosted-link.mjs --replace` and approve the new code in the verified Portal to switch that link.
+
+Then run the plugin's `recover-verify.sh` helper using the `Bash` tool. The helper POSTs to `/api/v1/recover/verify` with `Content-Type: application/json` (programmatic flow — no HTML page in the loop), validates the response shape, and persists the legacy credentials atomically to `~/.config/axonflow/try-registration.json` (mode 0600 inside a 0700 directory). The hooks read that file only when no plugin-specific Hosted link exists.
 
 ```
 $CLAUDE_PLUGIN_ROOT/scripts/recover-verify.sh '<token>'
