@@ -79,11 +79,16 @@ jq -e '.mcpServers.axonflow.url == "${AXONFLOW_ENDPOINT:-http://localhost:8080}/
   . "$ROOT/scripts/client-header.sh"
   test "$AXONFLOW_ENDPOINT" = "$AXONFLOW_HOSTED_E2E_ENDPOINT"
   test "$AXONFLOW_MCP_AUTHORIZATION" = "Basic $AXONFLOW_AUTH"
+  mcp_headers=$(sh -c "$(jq -r '.mcpServers.axonflow.headersHelper' "$ROOT/.mcp.json")")
+  mcp_auth=$(printf '%s' "$mcp_headers" | jq -r '.Authorization // empty')
+  mcp_client=$(printf '%s' "$mcp_headers" | jq -r '."X-Axonflow-Client" // empty')
+  test "$mcp_auth" = "$AXONFLOW_MCP_AUTHORIZATION"
+  test "$mcp_client" = "$AXONFLOW_CLIENT_HEADER"
   mcp_code=$("$REAL_CURL" -sS --max-time 8 -o "$WORK/mcp.body" -w '%{http_code}' \
     -X POST "$AXONFLOW_ENDPOINT/api/v1/mcp-server" \
     -H 'Content-Type: application/json' -H 'Accept: application/json' \
-    -H "Authorization: $AXONFLOW_MCP_AUTHORIZATION" \
-    -H "X-Axonflow-Client: $AXONFLOW_CLIENT_HEADER" \
+    -H "Authorization: $mcp_auth" \
+    -H "X-Axonflow-Client: $mcp_client" \
     -d '{"jsonrpc":"2.0","id":"mcp-proof","method":"tools/call","params":{"name":"check_policy","arguments":{"connector_type":"claude_code.Bash","statement":"echo axonflow-hosted-link-probe","operation":"execute"}}}')
   test "$mcp_code" = 200
   jq -e '.jsonrpc == "2.0" and .id == "mcp-proof" and .result.isError != true and (.result.content[0].text | fromjson | .allowed == true)' "$WORK/mcp.body" >/dev/null
