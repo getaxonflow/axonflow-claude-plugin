@@ -74,6 +74,10 @@ AXONFLOW_TEST_PLUGIN_ROOT="$STAGE_DIR" bash "$PLUGIN_DIR/tests/test-hosted-link.
   && pass "staged Hosted device link and credential setup" \
   || fail "staged Hosted device link and credential setup"
 
+bash "$PLUGIN_DIR/tests/test-hosted-e2e-observer.sh" >"$LOG_DIR/hosted-e2e-observer.log" 2>&1 \
+  && pass "Hosted real-stack proof requires an observed Agent decision" \
+  || fail "Hosted real-stack proof accepted a missing Agent decision"
+
 # 2b. status.sh smoke — invoke the staged script against an empty
 # AXONFLOW_CONFIG_DIR (no registration file, no license token) and
 # assert the Free-tier output shape PLUS that no full-token-shaped
