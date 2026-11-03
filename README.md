@@ -60,6 +60,7 @@ PreToolUse hook fires automatically
 
 **Fail behavior:**
 - Hosted AxonFlow unreachable (network) → tool call denied
+- Hosted refusal, server fault, or missing policy decision → tool call denied
 - Self-hosted AxonFlow unreachable (network) → fail-open, tool execution continues
 - AxonFlow auth/config error → fail-closed, tool call denied until config is fixed
 - PostToolUse failures → never block (audit and PII scan are best-effort)

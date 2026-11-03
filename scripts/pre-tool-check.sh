@@ -306,10 +306,13 @@ fi
 # envelope's resets_at deadline. While a hosted Free-tier limit holds, the
 # tool call is DENIED with the limit named (the upgrade prompt was surfaced
 # when the throttle landed): over the cap is deny, not governance off (ruled
-# 2026-09-14; reversible here). The 401 pause (auth_failure) still falls open.
+# 2026-09-14; reversible here). Hosted also denies during the 401 cooldown.
 if axonflow_throttle_active; then
   if [ "$(axonflow_throttle_limit_type)" != "auth_failure" ]; then
     axonflow_pre_deny "$AXONFLOW_LIMIT_DENY_REASON"
+  fi
+  if [ "$AXONFLOW_MODE" = "community-saas" ]; then
+    axonflow_pre_deny "AxonFlow governance blocked: Hosted authentication cooldown is active."
   fi
   exit 0
 fi
@@ -387,13 +390,28 @@ fi
 JSONRPC_CODE_FOR_AUTH=$(jq -r '.error.code // empty' "$PRECHECK_BODY" 2>/dev/null)
 if [ "$JSONRPC_CODE_FOR_AUTH" != "-32001" ]; then
   if axonflow_handle_auth_failure "$HTTP_CODE" "$PRECHECK_BODY" "$PRECHECK_HEADERS"; then
+    if [ "$AXONFLOW_MODE" = "community-saas" ]; then
+      axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent rejected authentication (HTTP 401)."
+    fi
     exit 0
   fi
 fi
 
+# An HTTP refusal or server fault is not a Hosted policy decision, even when
+# its body is empty or shaped unlike the expected JSON-RPC envelope.
+if [ "$AXONFLOW_MODE" = "community-saas" ] && [ "$HTTP_CODE" != "200" ]; then
+  axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent refused the policy check (HTTP ${HTTP_CODE:-unknown})."
+fi
+
 RESPONSE=$(cat "$PRECHECK_BODY")
 if [ -z "$RESPONSE" ]; then
+  if [ "$AXONFLOW_MODE" = "community-saas" ]; then
+    axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent returned no policy decision."
+  fi
   exit 0
+fi
+if [ "$AXONFLOW_MODE" = "community-saas" ] && ! echo "$RESPONSE" | jq -e 'type == "object"' >/dev/null 2>&1; then
+  axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent returned an invalid policy response."
 fi
 
 # Check for JSON-RPC error responses and apply the fail-open / fail-closed
@@ -402,8 +420,8 @@ fi
 #   Auth errors (-32001):       DENY — operator must fix AXONFLOW_AUTH
 #   Method not found (-32601):  DENY — plugin version mismatch with agent
 #   Invalid params (-32602):    DENY — plugin bug, operator should upgrade
-#   Parse errors (-32700):      ALLOW — transient
-#   Internal errors (-32603):   ALLOW — server-side fault, not operator's
+#   Parse errors (-32700):      Hosted DENY; self-hosted ALLOW
+#   Internal errors (-32603):   Hosted DENY; self-hosted ALLOW
 #   Everything else:            DENY — unknown code, fail closed (2026-09-14)
 JSONRPC_ERROR=$(echo "$RESPONSE" | jq -r '.error.message // empty' 2>/dev/null || echo "")
 if [ -n "$JSONRPC_ERROR" ]; then
@@ -423,7 +441,7 @@ if [ -n "$JSONRPC_ERROR" ]; then
       # working while they fix the credential, at the cost of running
       # ungoverned. OFF by default; emits a loud stderr warning every time
       # it fires — never a silent weakening of the posture.
-      if [ "${AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR:-}" = "1" ] || [ "${AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR:-}" = "true" ]; then
+      if [ "$AXONFLOW_MODE" != "community-saas" ] && { [ "${AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR:-}" = "1" ] || [ "${AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR:-}" = "true" ]; }; then
         echo "[AxonFlow] WARNING: auth error from ${ENDPOINT} (${JSONRPC_ERROR}); AXONFLOW_FAIL_OPEN_ON_AUTH_ERROR is set, so this tool call is ALLOWED WITHOUT GOVERNANCE. Set AXONFLOW_AUTH=base64(org_id:license_key) and unset this break-glass to restore enforcement." >&2
         exit 0
       fi
@@ -464,7 +482,10 @@ if [ -n "$JSONRPC_ERROR" ]; then
       exit 0
       ;;
     -32603|-32700)
-      # Transient or server-side — fail open.
+      if [ "$AXONFLOW_MODE" = "community-saas" ]; then
+        axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent returned an error (${JSONRPC_ERROR}, code ${JSONRPC_CODE})."
+      fi
+      # Self-hosted preserves its historical fail-open behavior.
       exit 0
       ;;
     *)
@@ -474,14 +495,22 @@ if [ -n "$JSONRPC_ERROR" ]; then
   esac
 fi
 
+if [ "$AXONFLOW_MODE" = "community-saas" ] && ! echo "$RESPONSE" | jq -e \
+  '.jsonrpc == "2.0" and .id == "hook-pre" and (.result | type) == "object" and (.result.content | type) == "array" and .result.content[0].type == "text"' >/dev/null 2>&1; then
+  axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent returned an invalid policy response."
+fi
+
 # Parse the MCP response to get the tool result
 TOOL_RESULT=$(echo "$RESPONSE" | jq -r '.result.content[0].text // empty' 2>/dev/null || echo "")
 if [ -z "$TOOL_RESULT" ]; then
   # A JSON-RPC result with no tool result carries no decision: fail closed.
-  # Anything else (no result object at all) is an unexpected format: fail
-  # open for robustness, as before.
+  # Hosted requires a result. Self-hosted keeps the historical fail-open
+  # behavior when the response has no result object.
   if echo "$RESPONSE" | jq -e 'has("result")' >/dev/null 2>&1; then
     axonflow_pre_deny "AxonFlow governance blocked: the AxonFlow agent returned a policy result without a decision, so this tool call is blocked."
+  fi
+  if [ "$AXONFLOW_MODE" = "community-saas" ]; then
+    axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent returned no policy decision."
   fi
   exit 0
 fi
