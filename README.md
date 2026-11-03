@@ -59,7 +59,8 @@ PreToolUse hook fires automatically
 **Governed tools:** `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP server tools (`mcp__*`). Read-only tools (`Read`, `Glob`, `Grep`) are not governed by default — they don't modify state or send data externally.
 
 **Fail behavior:**
-- AxonFlow unreachable (network) → fail-open, tool execution continues
+- Hosted AxonFlow unreachable (network) → tool call denied
+- Self-hosted AxonFlow unreachable (network) → fail-open, tool execution continues
 - AxonFlow auth/config error → fail-closed, tool call denied until config is fixed
 - PostToolUse failures → never block (audit and PII scan are best-effort)
 

@@ -94,8 +94,8 @@ jq -e '.mcpServers.axonflow.url == "${AXONFLOW_ENDPOINT:-http://localhost:8080}/
   jq -e '.jsonrpc == "2.0" and .id == "mcp-proof" and .result.isError != true and (.result.content[0].text | fromjson | .allowed == true)' "$WORK/mcp.body" >/dev/null
 )
 
-# Force a real transport failure for the same Agent origin. The production
-# hook may fail open; the release proof must still reject its missing decision.
+# Force a real transport failure for the same Agent origin. Hosted must deny
+# the tool call and the release proof must reject its missing decision.
 env -u AXONFLOW_ENDPOINT -u AXONFLOW_AUTH -u AXONFLOW_MCP_AUTHORIZATION \
   HOME="$WORK/home" AXONFLOW_CONFIG_DIR="$AXONFLOW_CONFIG_DIR" AXONFLOW_TELEMETRY=off \
   PATH="$WORK/bin:$PATH" AXONFLOW_E2E_REAL_CURL="$REAL_CURL" \
@@ -107,6 +107,7 @@ env -u AXONFLOW_ENDPOINT -u AXONFLOW_AUTH -u AXONFLOW_MCP_AUTHORIZATION \
   bash -c 'source "$1"; printf "%s\n" "$3" | bash "$2"' _ \
     "$ROOT/scripts/hosted-env.sh" "$ROOT/scripts/pre-tool-check.sh" "$HOOK_INPUT" \
   >"$WORK/transport.out" 2>"$WORK/transport.err"
+jq -e '.hookSpecificOutput.permissionDecision == "deny"' "$WORK/transport.out" >/dev/null
 test -s "$WORK/transport.error"
 if observed_allow "$WORK/transport.decision"; then
   echo 'FAIL: a transport failure satisfied the Agent-decision proof' >&2

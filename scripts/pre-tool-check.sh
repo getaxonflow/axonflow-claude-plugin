@@ -10,6 +10,44 @@
 # Exit 0 + no output = allow (no opinion)
 # Exit 0 + JSON with permissionDecision:"allow" = explicit allow
 
+# Recognize equivalent Hosted origins before dependency checks or mode selection.
+# A malformed URL on the Hosted hostname must not take the self-hosted fail-open
+# path. Lookalike hostnames remain self-hosted.
+axonflow_canonical_hosted_endpoint() {
+  local url="$1" scheme authority authority_host suffix host
+  [[ "$url" =~ ^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]+)(.*)$ ]] || return 1
+  scheme=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+  authority=$(printf '%s' "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')
+  suffix="${BASH_REMATCH[3]}"
+  if [[ "$authority" == *@* ]]; then
+    authority_host="${authority##*@}"
+    case "$authority_host" in
+      try.getaxonflow.com|try.getaxonflow.com.|try.getaxonflow.com:*|try.getaxonflow.com.:*|try-staging.getaxonflow.com|try-staging.getaxonflow.com.|try-staging.getaxonflow.com:*|try-staging.getaxonflow.com.:*) return 2 ;;
+    esac
+  fi
+  case "$authority" in
+    try.getaxonflow.com|try.getaxonflow.com.|try.getaxonflow.com:*|try.getaxonflow.com.:*) host=try.getaxonflow.com ;;
+    try-staging.getaxonflow.com|try-staging.getaxonflow.com.|try-staging.getaxonflow.com:*|try-staging.getaxonflow.com.:*) host=try-staging.getaxonflow.com ;;
+    *) return 1 ;;
+  esac
+  if [[ "$scheme" != https || ! "$suffix" =~ ^/*$ ]]; then return 2; fi
+  case "$authority" in
+    "$host"|"$host."|"$host:443"|"$host.:443") printf 'https://%s' "$host" ;;
+    *) return 2 ;;
+  esac
+}
+if [ -n "${AXONFLOW_ENDPOINT:-}" ]; then
+  hosted_origin=$(axonflow_canonical_hosted_endpoint "$AXONFLOW_ENDPOINT")
+  hosted_status=$?
+  if [ "$hosted_status" -eq 0 ]; then
+    AXONFLOW_ENDPOINT="$hosted_origin"
+    export AXONFLOW_ENDPOINT
+  elif [ "$hosted_status" -eq 2 ]; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"AxonFlow governance is blocked: invalid Hosted endpoint URL."}}'
+    exit 0
+  fi
+fi
+
 # A Hosted hook without its dependencies cannot check a governed call.
 case "${AXONFLOW_ENDPOINT:-}" in
   ""|https://try.getaxonflow.com|https://try-staging.getaxonflow.com)
@@ -31,8 +69,8 @@ if ! command -v curl &>/dev/null; then
 fi
 
 # Endpoint resolution per ADR-048: default to AxonFlow Community SaaS only when
-# the user has not set explicit config. Any user-supplied AXONFLOW_ENDPOINT or
-# AXONFLOW_AUTH is honoured untouched — no silent override.
+# the user has not set explicit config. Equivalent Hosted URL spellings are
+# canonicalized above; self-hosted configuration is honored untouched.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
   ENDPOINT="https://try.getaxonflow.com"
@@ -278,9 +316,8 @@ fi
 
 # Call AxonFlow check_policy via MCP server.
 #
-# Issue #1545 Direction 3: fail OPEN on any network-level failure (timeout,
-# DNS failure, connection refused, 5xx). Only auth/config errors reported
-# by AxonFlow fail closed (see the JSONRPC_ERROR handling below).
+# Self-hosted keeps its historical fail-open behavior on transport failures.
+# Hosted requires an observed decision before the tool can run.
 #
 # V1 Plugin Pro: capture HTTP status + headers + body separately so the
 # envelope handler can detect 429 / 403 and stamp the throttle deadline
@@ -312,9 +349,12 @@ HTTP_CODE=$(curl -sS --max-time "$REQUEST_TIMEOUT_SECONDS" \
     }')" 2>/dev/null)
 CURL_EXIT=$?
 
-# Any curl-level failure — timeout, DNS failure, connection refused, TCP
-# reset — fails open.
+# A Hosted curl-level failure has no decision; block it. Self-hosted keeps its
+# historical fail-open behavior for timeout, DNS failure, and connection loss.
 if [ "$CURL_EXIT" -ne 0 ]; then
+  if [ "$AXONFLOW_MODE" = "community-saas" ]; then
+    axonflow_pre_deny "AxonFlow governance blocked: Hosted Agent could not be reached."
+  fi
   exit 0
 fi
 
