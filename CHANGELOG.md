@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [1.14.0] - pending release
+
 - Hosted first run now directs the user to verified Portal signup and an explicit device link. `scripts/hosted-link.mjs` generates and stores a per-installation credential locally after browser approval; `scripts/hosted-env.sh` exports it for Claude Code's MCP connection without printing the secret. Hooks no longer call anonymous `/api/v1/register` and deny unlinked governed calls. Existing protected credentials and explicit self-hosted configuration retain precedence.
 
 ## [1.13.0] - 2026-09-14: a policy answer without a decision now blocks the tool call
