@@ -178,7 +178,7 @@ git clone https://github.com/getaxonflow/axonflow-claude-plugin.git
 claude --plugin-dir /path/to/axonflow-claude-plugin
 ```
 
-> The plugin has been submitted to the official Anthropic marketplace (`anthropics/claude-plugins-official`) and is currently in Anthropic's review queue. Until it appears in `/plugin > Discover`, use one of the install methods above.
+Use one of the install methods above. Availability in `/plugin > Discover` depends on the host marketplace listing.
 
 ### Step 3: point the plugin at the platform
 
