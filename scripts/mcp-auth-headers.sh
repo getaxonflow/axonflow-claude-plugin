@@ -16,11 +16,11 @@
 # Resolution order (ADR-048):
 #   1. AXONFLOW_AUTH already exported by the user → use it (self-hosted /
 #      enterprise / explicit credential).
-#   2. No explicit AXONFLOW_AUTH and no AXONFLOW_ENDPOINT → run the
-#      Community-SaaS bootstrap to register against try.getaxonflow.com
-#      and load the resulting Basic-auth credential.
-#   3. AXONFLOW_AUTH still empty after that (bootstrap couldn't run /
-#      degraded) → emit empty headers (Community-mode self-hosted, no auth).
+#   2. No explicit AXONFLOW_AUTH and no AXONFLOW_ENDPOINT → load an
+#      existing protected legacy Hosted credential. A plugin-specific link
+#      needs hosted-env.sh so MCP and hooks share the same endpoint and auth.
+#   3. No credential → emit no Authorization header. The user must complete
+#      verified signup and device linking before using Hosted governance.
 
 # When this script is invoked by Claude Code's headersHelper, AXONFLOW_MODE
 # is not yet set; resolve it the same way pre-tool-check.sh does so the
@@ -31,10 +31,16 @@ if [ -z "${AXONFLOW_MODE:-}" ]; then
   else
     AXONFLOW_MODE="self-hosted"
   fi
+  case "${AXONFLOW_ENDPOINT:-}" in
+    https://try.getaxonflow.com|https://try-staging.getaxonflow.com) AXONFLOW_MODE="community-saas" ;;
+  esac
   export AXONFLOW_MODE
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# This reference helper does not set the MCP endpoint from a linked file.
+# Load linked auth only when hosted-env.sh exported the matching endpoint.
+export AXONFLOW_MCP_HEADERS_HELPER=1
 # shellcheck disable=SC1091
 . "${SCRIPT_DIR}/community-saas-bootstrap.sh"
 

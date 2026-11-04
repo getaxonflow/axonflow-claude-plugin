@@ -5,13 +5,12 @@
 # Drives the plugin through its actual public hook entry point
 # (scripts/pre-tool-check.sh) twice:
 #
-#   Run 1 — COLD START. Sandboxed HOME, no registration file, no telemetry
-#   stamp. Expectations:
+#   Run 1 — LINKED START. Sandboxed HOME, a protected locally linked
+#   credential, and no telemetry stamp. Expectations:
 #     1. pre-tool-check.sh returns exit 0.
 #     2. Mode-clarity canary on stderr: "[AxonFlow] Connected to AxonFlow at
 #        http://127.0.0.1:<port> (mode=community-saas)".
-#     3. Bootstrap registers against the fake /api/v1/register and persists
-#        ~/.config/axonflow/try-registration.json (mode 0600).
+#     3. The hook reads the protected credential without registering.
 #     4. Telemetry heartbeat fires once (counter goes 0 → 1) with
 #        deployment_mode=community-saas, and carries license_tier relayed
 #        verbatim from the `tier` key of the /health response (#3619).
@@ -19,7 +18,7 @@
 #
 #   Run 2 — WARM CACHE. Same sandbox HOME. Expectations:
 #     1. pre-tool-check.sh returns exit 0.
-#     2. Bootstrap reads cached registration (no fresh /register call).
+#     2. The hook reads the same credential (no /register call).
 #     3. Telemetry heartbeat is suppressed by the 7-day stamp gate
 #        (counter delta = 0).
 #
@@ -103,23 +102,21 @@ pass() {
 # ---------------------------------------------------------------------------
 # Run 1: COLD START
 # ---------------------------------------------------------------------------
-echo "--- Cold start: bootstrap + first heartbeat ---"
+echo "--- Linked start: protected credential + first heartbeat ---"
 
 # Critical: clear AXONFLOW_ENDPOINT/AUTH so the resolver picks community-saas.
 # AXONFLOW_CHECKPOINT_URL points the heartbeat at our fake instead of the
 # real checkpoint.getaxonflow.com.
 COLD_STDIN='{"tool_name":"Bash","tool_input":{"command":"echo hi"}}'
 
-# IMPORTANT: the plugin's bootstrap pings https://try.getaxonflow.com directly
-# (it's hardcoded in community-saas-bootstrap.sh). For a localhost-only test
-# we override AXONFLOW_TELEMETRY=off (heartbeat-only stays under
-# AXONFLOW_CHECKPOINT_URL control, but registration always uses the
-# hardcoded production URL). To test the full registration path against the
-# fake, we set AXONFLOW_REGISTER_URL — supported by tests/heartbeat-real-stack
-# but NOT by the production bootstrap. We rely on the harness running with a
-# patched bootstrap variant via AXONFLOW_HARNESS=1 detection in the
-# bootstrap script (added below). When AXONFLOW_HARNESS=1, the bootstrap
-# uses ${AXONFLOW_HARNESS_REGISTER_URL:-prod-default}.
+# A real device-link flow writes this file only after owner approval. This
+# harness pre-seeds the same on-disk shape to exercise the hook and heartbeat.
+REG_FILE="${SANDBOX_HOME}/.config/axonflow/hosted-claude-code.json"
+: > "$WORK_DIR/_registrations.jsonl"
+mkdir -p "$(dirname "$REG_FILE")"
+chmod 0700 "$(dirname "$REG_FILE")"
+printf '%s' '{"tenant_id":"cs_12345678-1234-1234-1234-123456789abc","secret":"linked-test-secret","expires_at":"2099-01-01T00:00:00Z","endpoint":"https://try.getaxonflow.com","link_method":"portal-device"}' > "$REG_FILE"
+chmod 0600 "$REG_FILE"
 COLD_OUT=$(
   env -i \
     HOME="$SANDBOX_HOME" \
@@ -127,7 +124,6 @@ COLD_OUT=$(
     AXONFLOW_TELEMETRY="" \
     AXONFLOW_CHECKPOINT_URL="$CHECKPOINT_URL" \
     AXONFLOW_HARNESS=1 \
-    AXONFLOW_HARNESS_REGISTER_URL="${ENDPOINT}/api/v1/register" \
     AXONFLOW_HARNESS_AGENT_ENDPOINT="$ENDPOINT" \
     bash "$PRE_TOOL" <<<"$COLD_STDIN" 2>"$WORK_DIR/_cold_stderr"
 )
@@ -151,10 +147,9 @@ else
   cat "$WORK_DIR/_cold_stderr" >&2
 fi
 
-# Assertion 3: registration file created at correct path with mode 0600.
-REG_FILE="${SANDBOX_HOME}/.config/axonflow/try-registration.json"
+# Assertion 3: linked credential remains protected and no registration fired.
 if [ -f "$REG_FILE" ]; then
-  pass "registration file written"
+  pass "linked credential remains on disk"
   REG_MODE=$(stat -c %a "$REG_FILE" 2>/dev/null) || REG_MODE=""
   case "$REG_MODE" in ''|*[!0-9]*) REG_MODE=$(stat -f %Lp "$REG_FILE" 2>/dev/null) || REG_MODE="" ;; esac
   case "$REG_MODE" in ''|*[!0-9]*) REG_MODE="" ;; esac
@@ -169,7 +164,12 @@ if [ -f "$REG_FILE" ]; then
     *) fail "registration file tenant_id is not cs_*: $REG_TENANT" ;;
   esac
 else
-  fail "registration file not written at $REG_FILE"
+  fail "linked credential missing at $REG_FILE"
+fi
+if [ ! -s "$WORK_DIR/_registrations.jsonl" ]; then
+  pass "hook made no registration POST"
+else
+  fail "hook made an unexpected registration POST"
 fi
 
 # Assertion 4: telemetry heartbeat fired once.
@@ -205,10 +205,8 @@ if [ -f "$WORK_DIR/_pings.jsonl" ]; then
   else
     fail "ping deployment_mode=$COLD_MODE (expected self_hosted)"
   fi
-  # v9.1 (#2277): plugin telemetry includes org_id, sourced from the
-  # registration file's tenant_id. In this harness the registration
-  # cycle ran above and stored a cs_<uuid> at REG_FILE — assert the
-  # captured ping body carries that exact value.
+  # v9.1 (#2277): plugin telemetry includes org_id sourced from the
+  # registration file's tenant_id (or local-dev-org sentinel).
   COLD_ORG_ID=$(jq -r '.org_id' "$WORK_DIR/_pings.jsonl" | head -1)
   if [ -n "$COLD_ORG_ID" ] && [ "$COLD_ORG_ID" = "$REG_TENANT" ]; then
     pass "ping org_id matches registered tenant_id ($COLD_ORG_ID)"
@@ -269,7 +267,6 @@ env -i \
   AXONFLOW_TELEMETRY="" \
   AXONFLOW_CHECKPOINT_URL="$CHECKPOINT_URL" \
   AXONFLOW_HARNESS=1 \
-  AXONFLOW_HARNESS_REGISTER_URL="${ENDPOINT}/api/v1/register" \
   AXONFLOW_HARNESS_AGENT_ENDPOINT="$ENDPOINT" \
   bash "$PRE_TOOL" <<<"$COLD_STDIN" >/dev/null 2>>"$WORK_DIR/_warm_stderr"
 WARM_RC=$?
@@ -282,7 +279,7 @@ else
   fail "warm-cache exit $WARM_RC"
 fi
 
-# Bootstrap should have used the cached registration → no new POST /register.
+# The hook should reuse the linked credential → no new POST /register.
 WARM_REG_AFTER=$(wc -l < "$WORK_DIR/_registrations.jsonl" 2>/dev/null || echo 0)
 if [ "$WARM_REG_AFTER" -eq "$WARM_REG_BEFORE" ]; then
   pass "no new registration POST (cached path)"

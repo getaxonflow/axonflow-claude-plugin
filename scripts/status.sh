@@ -10,7 +10,7 @@
 #      rather than discovering it at the next governed tool call).
 #
 # v1.5.0 terminology: the label is `client_id`; on-disk the field is still
-# stored as `tenant_id` in ~/.config/axonflow/try-registration.json (kept
+# stored as `tenant_id` in the protected Hosted or legacy registration file (kept
 # for file-format compat with the installed base). Same value, new
 # user-facing name. See CHANGELOG v1.5.0.
 #
@@ -61,7 +61,8 @@ fi
 # tests + air-gapped users who keep credentials elsewhere) before falling
 # back to the canonical ~/.config/axonflow path.
 CONFIG_DIR="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}"
-REG_FILE="${CONFIG_DIR}/try-registration.json"
+REG_FILE="${CONFIG_DIR}/hosted-claude-code.json"
+[ -e "$REG_FILE" ] || REG_FILE="${CONFIG_DIR}/try-registration.json"
 
 # Resolve client_id from the registration file. The JSON field is still
 # `tenant_id` on disk (file-format compat with existing installs from
@@ -218,8 +219,8 @@ if [ -n "$CLIENT_ID" ]; then
   echo "OK  client_id=${CLIENT_ID}  (formerly tenant_id)"
 else
   echo "WARN client_id=<not found at ${REG_FILE}>  (formerly tenant_id)"
-  echo "    Run /axonflow-recover <email> if you've lost your registration,"
-  echo "    or remove ${REG_FILE} and reload Claude Code to re-register against ${ENDPOINT}."
+  echo "    Open https://portal.try.getaxonflow.com/hosted/start and run scripts/hosted-link.mjs to link this installation."
+  echo "    Existing legacy users can run /axonflow-recover <email> to recover their old registration."
 fi
 echo "OK  tier=${TIER_LINE}"
 echo "OK  license_token=${TOKEN_DISPLAY}"

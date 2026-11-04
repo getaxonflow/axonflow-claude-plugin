@@ -146,7 +146,7 @@ fi
 # branch, /health probes hit localhost, and the heartbeat ships
 # platform_version=null for real Community-SaaS users.
 if [ "${AXONFLOW_MODE:-}" = "community-saas" ]; then
-  ENDPOINT="https://try.getaxonflow.com"
+  ENDPOINT="${AXONFLOW_ENDPOINT:-https://try.getaxonflow.com}"
 elif [ -z "${AXONFLOW_ENDPOINT:-}" ] && [ -z "${AXONFLOW_AUTH:-}" ]; then
   ENDPOINT="https://try.getaxonflow.com"
 else
@@ -398,7 +398,8 @@ fi
 # order: ORG_ID env (operator-supplied on self-hosted) → tenant_id from
 # ~/.config/axonflow/try-registration.json (Community SaaS cs_<uuid>) →
 # "local-dev-org" sentinel. Always emitted.
-REGISTRATION_FILE="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}/try-registration.json"
+REGISTRATION_FILE="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}/hosted-claude-code.json"
+[ -e "$REGISTRATION_FILE" ] || REGISTRATION_FILE="${AXONFLOW_CONFIG_DIR:-${HOME}/.config/axonflow}/try-registration.json"
 if [ -n "${ORG_ID:-}" ]; then
   ORG_ID_VALUE="$ORG_ID"
 elif [ -f "$REGISTRATION_FILE" ]; then

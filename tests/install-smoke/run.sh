@@ -54,6 +54,8 @@ cp -p "$PLUGIN_DIR/hooks/hooks.json" "$STAGE_DIR/hooks/" \
   || fail "missing hooks/hooks.json"
 cp -p "$PLUGIN_DIR/scripts/"*.sh "$STAGE_DIR/scripts/" \
   || fail "missing scripts/*.sh"
+cp -p "$PLUGIN_DIR/scripts/hosted-link.mjs" "$STAGE_DIR/scripts/" \
+  || fail "missing scripts/hosted-link.mjs"
 chmod +x "$STAGE_DIR/scripts/"*.sh
 
 # 2. Validate file list.
@@ -62,11 +64,19 @@ for f in .claude-plugin/plugin.json .mcp.json hooks/hooks.json \
          scripts/telemetry-ping.sh scripts/mcp-auth-headers.sh \
          scripts/license-token.sh scripts/login.sh \
          scripts/recover.sh scripts/recover-verify.sh \
-         scripts/status.sh; do
+         scripts/status.sh scripts/hosted-link.mjs scripts/hosted-env.sh; do
   if [ -f "$STAGE_DIR/$f" ]; then pass "staged $f"
   else fail "missing $f after stage"
   fi
 done
+
+AXONFLOW_TEST_PLUGIN_ROOT="$STAGE_DIR" bash "$PLUGIN_DIR/tests/test-hosted-link.sh" \
+  && pass "staged Hosted device link and credential setup" \
+  || fail "staged Hosted device link and credential setup"
+
+bash "$PLUGIN_DIR/tests/test-hosted-e2e-observer.sh" >"$LOG_DIR/hosted-e2e-observer.log" 2>&1 \
+  && pass "Hosted real-stack proof requires an observed Agent decision" \
+  || fail "Hosted real-stack proof accepted a missing Agent decision"
 
 # 2b. status.sh smoke — invoke the staged script against an empty
 # AXONFLOW_CONFIG_DIR (no registration file, no license token) and

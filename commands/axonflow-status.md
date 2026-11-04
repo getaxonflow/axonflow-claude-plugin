@@ -12,7 +12,7 @@ Run the plugin's `status.sh` helper using the `Bash` tool:
 $CLAUDE_PLUGIN_ROOT/scripts/status.sh
 ```
 
-The helper resolves the same way the runtime hooks do — `AXONFLOW_ENDPOINT` if set, otherwise the Community SaaS at `https://try.getaxonflow.com` — and reads `~/.config/axonflow/try-registration.json` (or `$AXONFLOW_CONFIG_DIR/try-registration.json` when set) for the `tenant_id`. Tier is computed from whether `AXONFLOW_LICENSE_TOKEN` env var or `~/.config/axonflow/license-token.json` resolves to a valid `AXON-`-prefixed token AND its JWT `exp` claim is in the future. Three tier-line shapes are possible:
+The helper resolves the same way the runtime hooks do — `AXONFLOW_ENDPOINT` if set, otherwise the Community SaaS at `https://try.getaxonflow.com` — and reads the protected `hosted-claude-code.json` link, falling back to the legacy `try-registration.json`, for the `tenant_id`. Tier is computed from whether `AXONFLOW_LICENSE_TOKEN` env var or `~/.config/axonflow/license-token.json` resolves to a valid `AXON-`-prefixed token AND its JWT `exp` claim is in the future. Three tier-line shapes are possible:
 
 - `tier=Pro (expires 2026-08-03, 90 days remaining)` — paid Pro tier active.
 - `tier=Free (Pro expired 2026-02-04 — visit https://getaxonflow.com/pricing/ to renew)` — token configured but its `exp` is in the past; plugin will not forward it. User must renew + re-run `/axonflow-login --token <new>`.
@@ -20,7 +20,7 @@ The helper resolves the same way the runtime hooks do — `AXONFLOW_ENDPOINT` if
 
 Output is line-oriented (`OK  field=value`-style), so render it back to the user verbatim, then add:
 
-> "Copy the `tenant_id` line above into the **'AxonFlow tenant ID'** custom field at Stripe checkout when you upgrade to Pro. If `tenant_id` is empty, run `/axonflow-recover <email>` to recover (or re-register by removing `~/.config/axonflow/try-registration.json` and reloading)."
+> "For Hosted, open the verified Portal and run `scripts/hosted-link.mjs` to link this installation. The older Plugin Pro flow uses the `client_id` in its separate Stripe checkout. If a legacy registration was lost, run `/axonflow-recover <email>`; reloading alone no longer registers a tenant."
 
 If the tier line shows `Pro expired …`, recommend the user renew and run `/axonflow-login --token <new-token>` to overwrite the on-disk token.
 

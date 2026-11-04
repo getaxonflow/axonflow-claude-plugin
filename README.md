@@ -59,7 +59,9 @@ PreToolUse hook fires automatically
 **Governed tools:** `Bash`, `Write`, `Edit`, `NotebookEdit`, and all MCP server tools (`mcp__*`). Read-only tools (`Read`, `Glob`, `Grep`) are not governed by default — they don't modify state or send data externally.
 
 **Fail behavior:**
-- AxonFlow unreachable (network) → fail-open, tool execution continues
+- Hosted AxonFlow unreachable (network) → tool call denied
+- Hosted refusal, server fault, or missing policy decision → tool call denied
+- Self-hosted AxonFlow unreachable (network) → fail-open, tool execution continues
 - AxonFlow auth/config error → fail-closed, tool call denied until config is fixed
 - PostToolUse failures → never block (audit and PII scan are best-effort)
 
@@ -134,7 +136,7 @@ For any serious use, choose one of the following instead:
 2. **Community Edition with an [Evaluation License](https://docs.getaxonflow.com/docs/deployment/evaluation-rollout-guide/)** — for production use with real users or clients on the open core; adds production-fit limits and license-gated features. Free 90-day [evaluation license](https://getaxonflow.com/plugins/evaluation-license).
 3. **[AxonFlow Enterprise](https://docs.getaxonflow.com/docs/deployment/community-to-enterprise-migration/)** — production-grade governance, regulatory-grade controls, SLOs, and contractual commitments suitable for regulated industries. Contact [hello@getaxonflow.com](mailto:hello@getaxonflow.com).
 
-To skip Community SaaS entirely: set `AXONFLOW_ENDPOINT` to a self-hosted AxonFlow URL. That alone flips the plugin into self-hosted mode — the Community SaaS auto-bootstrap is not attempted, and no env var is required. Get the AxonFlow platform from [getaxonflow/axonflow](https://github.com/getaxonflow/axonflow) and follow the [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) guide for the Docker Compose setup. For air-gapped environments where AxonFlow is not yet reachable but you want to suppress the bootstrap attempt, set `AXONFLOW_COMMUNITY_SAAS=0`; set `AXONFLOW_TELEMETRY=off` to also disable the anonymous 7-day heartbeat.
+To skip Community SaaS entirely: set `AXONFLOW_ENDPOINT` to a self-hosted AxonFlow URL. That points the plugin at your own instance; no Hosted credential is loaded. Get the AxonFlow platform from [getaxonflow/axonflow](https://github.com/getaxonflow/axonflow) and follow the [Getting Started](https://docs.getaxonflow.com/docs/getting-started/) guide for the Docker Compose setup. Set `AXONFLOW_TELEMETRY=off` to disable the anonymous 7-day heartbeat.
 
 LLM provider keys never leave the user's machine in any mode — Claude Code makes the LLM calls; AxonFlow only enforces policies and records audit trails.
 
@@ -180,7 +182,7 @@ claude --plugin-dir /path/to/axonflow-claude-plugin
 
 ### Step 3: point the plugin at the platform
 
-Without this step the plugin auto-registers with Community SaaS regardless of whether you ran Step 1 — it does not auto-detect a locally-running AxonFlow. Set `AXONFLOW_ENDPOINT` (and `AXONFLOW_AUTH` if you have credentials):
+Without this step the plugin targets Hosted but does not create a tenant or auto-detect a locally running AxonFlow. Set `AXONFLOW_ENDPOINT` (and `AXONFLOW_AUTH` if you have credentials):
 
 ```bash
 # Self-hosted local agent — that alone flips mode to self-hosted, no other env var needed
@@ -249,7 +251,15 @@ The recommended self-hosted path is covered in [Install Step 1](#step-1-install-
 
 ### Community SaaS — for early exploration only
 
-The plugin's zero-config fallback when neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` is configured. The plugin registers a tenant with `try.getaxonflow.com` on first run and persists credentials at `~/.config/axonflow/try-registration.json` (mode `0600`).
+With neither `AXONFLOW_ENDPOINT` nor `AXONFLOW_AUTH` configured, the plugin targets `try.getaxonflow.com`. An unlinked first run denies governed tools and points you to verified Hosted signup. It does not call anonymous `/api/v1/register`.
+
+To link this installation:
+
+1. Open [Hosted signup](https://portal.try.getaxonflow.com/hosted/start), verify your email, and complete account and plan setup.
+2. From this plugin's install directory, run `node scripts/hosted-link.mjs` (Node.js 18 or later). The command generates a secret locally, prints a short code, and asks you to approve that code in the signed-in browser. The browser never displays or receives the reusable secret. The approved credential is saved to `~/.config/axonflow/hosted-claude-code.json` with mode `0600`. An existing plugin link is left untouched unless you explicitly pass `--replace`; the legacy shared registration file is never overwritten.
+3. In the shell that launches Claude Code, run `source scripts/hosted-env.sh`, then restart Claude Code. Claude Code's MCP URL and headers read environment variables at launch; sourcing exports the linked endpoint and Basic credential without printing the secret. The hooks also read the protected file when no explicit environment configuration is present.
+
+Existing `AXONFLOW_ENDPOINT` and `AXONFLOW_AUTH` settings take precedence. Existing protected `try-registration.json` credentials continue to load until their expiry; linking never silently replaces them.
 
 **Use only for early exploration of the plugin's behaviour. Not for production workloads, regulated environments, real user data, personal data, or any other sensitive information.**
 
